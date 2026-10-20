@@ -126,6 +126,7 @@ export interface RouteOption {
   recommendation_reasons: string[];
   geometry: GeoJSON.LineString;
   checkpoints: Checkpoint[];
+  heatmap_points: HeatmapPoint[];
 }
 
 export interface TripPlanDetail {
@@ -175,4 +176,18 @@ export namespace GeoJSON {
 export interface ApiError {
   detail?: string;
   [field: string]: unknown;
+}
+
+/**
+ * A dense corridor point used for the 0–48 hour weather heatmap.
+ * Each hourly array contains exactly 48 values (one per hour from departure).
+ */
+export interface HeatmapPoint {
+  lat: number;
+  lng: number;
+  mile: number;
+  hourly_risk: number[];
+  hourly_wind: number[];
+  hourly_rain: number[];
+  hourly_snow: number[];
 }

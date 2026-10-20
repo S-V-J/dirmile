@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CircleMarker,
   MapContainer,
@@ -8,6 +8,8 @@ import {
   useMap,
 } from "react-leaflet";
 
+import { ForecastSlider } from "./ForecastSlider";
+import { HeatmapLayer, type HeatmapMetric } from "./HeatmapLayer";
 import { RISK_HEX, routeLineColor } from "../lib/riskColors";
 import type { Checkpoint, RiskLevel, RouteOption } from "../types/api";
 import { RISK_LABELS } from "../types/api";
@@ -22,8 +24,6 @@ interface TripMapProps {
 
 /**
  * GeoJSON coordinates are [lng, lat]; Leaflet wants [lat, lng].
- * Written defensively so it compiles regardless of how narrowly
- * `geometry` is typed in src/types/api.ts.
  */
 function geometryToLatLngs(route: RouteOption): LatLngTuple[] {
   const geometry = route.geometry as { coordinates?: unknown } | null | undefined;
@@ -118,6 +118,11 @@ export function TripMap({
   const [showAllRoutes, setShowAllRoutes] = useState(true);
   const [showCheckpoints, setShowCheckpoints] = useState(true);
 
+  // Heatmap state
+  const [heatmapVisible, setHeatmapVisible] = useState(true);
+  const [heatmapHour, setHeatmapHour] = useState(0);
+  const [heatmapMetric, setHeatmapMetric] = useState<HeatmapMetric>("risk");
+
   const selected =
     routes.find((r) => r.id === selectedRouteId) ?? null;
 
@@ -126,6 +131,12 @@ export function TripMap({
     return selected.checkpoints.find((cp) => cp.id === highlightCheckpointId) ?? null;
   }, [highlightCheckpointId, selected]);
 
+  // Heatmap points come from the selected route (or recommended if none selected)
+  const heatmapPoints = useMemo(() => {
+    const route = selected ?? routes.find((r) => r.is_recommended) ?? null;
+    return route?.heatmap_points ?? [];
+  }, [selected, routes]);
+
   const center = useMemo<LatLngTuple>(() => {
     const pts = routes.flatMap(geometryToLatLngs);
     if (pts.length > 0) {
@@ -133,9 +144,18 @@ export function TripMap({
       const lng = pts.reduce((s, p) => s + p[1], 0) / pts.length;
       return [lat, lng];
     }
-    // Default view: continental US, used only before a plan exists.
     return [39.5, -86.0];
   }, [routes]);
+
+  const handleHourChange = useCallback((h: number) => setHeatmapHour(h), []);
+  const handleMetricChange = useCallback(
+    (m: HeatmapMetric) => setHeatmapMetric(m),
+    []
+  );
+  const handleToggleHeatmap = useCallback(
+    (v: boolean) => setHeatmapVisible(v),
+    []
+  );
 
   return (
     <div className="relative h-full w-full overflow-hidden rounded-xl border border-brand-800/50 bg-brand-900">
@@ -153,6 +173,14 @@ export function TripMap({
 
         <FitBounds routes={routes} />
         <FlyToCheckpoint checkpoint={highlightedCheckpoint} />
+
+        {/* Heatmap layer (rendered below polylines) */}
+        <HeatmapLayer
+          points={heatmapPoints}
+          hour={heatmapHour}
+          metric={heatmapMetric}
+          visible={heatmapVisible && heatmapPoints.length > 0}
+        />
 
         {/* Route polylines */}
         {routes.map((route, index) => {
@@ -200,7 +228,10 @@ export function TripMap({
                     <p>Wind: {cp.wind_mph.toFixed(1)} mph</p>
                     <p>Rain: {cp.rain_in_hr.toFixed(2)} in/hr</p>
                     <p>Snow: {cp.snow_in_hr.toFixed(2)} in/hr</p>
-                    <p className="font-semibold" style={{ color: RISK_HEX[cp.overall_risk] }}>
+                    <p
+                      className="font-semibold"
+                      style={{ color: RISK_HEX[cp.overall_risk] }}
+                    >
                       Risk: {RISK_LABELS[cp.overall_risk]}
                     </p>
                   </div>
@@ -230,6 +261,18 @@ export function TripMap({
           />
           Show checkpoints
         </label>
+      </div>
+
+      {/* ── Forecast slider (bottom-right) ───────────────────── */}
+      <div className="absolute bottom-3 right-3 z-[1000] w-72 max-w-[calc(100%-1.5rem)]">
+        <ForecastSlider
+          hour={heatmapHour}
+          onHourChange={handleHourChange}
+          metric={heatmapMetric}
+          onMetricChange={handleMetricChange}
+          visible={heatmapVisible}
+          onToggleVisible={handleToggleHeatmap}
+        />
       </div>
 
       {/* ── Risk legend (bottom-left) ────────────────────────── */}
