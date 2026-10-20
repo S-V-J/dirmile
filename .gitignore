@@ -81,3 +81,7 @@ Thumbs.db
 /.dirmile/
 *.pid
 *.port
+
+# Django test databases
+test_*.sqlite3
+Backend/test_*.sqlite3

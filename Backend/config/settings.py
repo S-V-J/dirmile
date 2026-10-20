@@ -39,10 +39,8 @@ if DEBUG and "testserver" not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append("testserver")
 
 # CSRF settings.
-# Local dynamic ports are allowed by regex.
 # For Cloudflare Tunnel or custom domains, add them to CSRF_TRUSTED_ORIGINS in .env.
 CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS", "")
-CSRF_TRUSTED_ORIGINS_REGEX = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
 
 # CORS settings.
 # Local dynamic ports are allowed by regex.
@@ -113,6 +111,13 @@ DATABASES = {
 # Custom user model must be set before first migration.
 AUTH_USER_MODEL = "accounts.User"
 
+# Use only Dirmile's authentication backend.
+# DirmileAuthBackend inherits from ModelBackend, so it can still handle
+# normal Django authentication while also supporting email/username/phone login.
+AUTHENTICATION_BACKENDS = [
+    "accounts.backends.DirmileAuthBackend",
+]
+
 AUTH_PASSWORD_VALIDATORS = [
     {
         "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
@@ -136,6 +141,9 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
+# Prevent WhiteNoise warning during development/tests.
+STATIC_ROOT.mkdir(parents=True, exist_ok=True)
+
 # Later, the built React frontend will be served from Frontend/dist.
 FRONTEND_DIST_DIR = PROJECT_ROOT / "Frontend" / "dist"
 STATICFILES_DIRS = []
@@ -152,6 +160,9 @@ STORAGES = {
     },
 }
 
+if DEBUG:
+    WHITENOISE_AUTOREFRESH = True
+
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
@@ -159,7 +170,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework.authentication.SessionAuthentication",
+        "accounts.authentication.DirmileSessionAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
@@ -202,3 +213,13 @@ LOGGING = {
         "level": "INFO",
     },
 }
+
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+
+CSRF_COOKIE_HTTPONLY = False
+CSRF_COOKIE_SAMESITE = "Lax"
+
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
