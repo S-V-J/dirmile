@@ -1,17 +1,18 @@
 import { useCallback, useState } from "react";
 
 import { useAuth } from "../auth/useAuth";
-import { TripForm } from "../components/TripForm";
-import { RouteCards } from "../components/RouteCards";
 import { CheckpointList } from "../components/CheckpointList";
+import { RouteCards } from "../components/RouteCards";
+import { TripForm } from "../components/TripForm";
+import { TripMap } from "../components/TripMap";
 import type { Checkpoint, RouteOption, TripPlanDetail } from "../types/api";
 
 /**
  * Main Web App page (authenticated).
  *
  * Layout:
- *   Desktop: left panel (form + route cards + checkpoint list) | right panel (map placeholder)
- *   Mobile: stacked sections
+ *   Desktop: left panel (form + route cards + checkpoint list) | right panel (map)
+ *   Mobile:  stacked sections
  */
 export function WebAppPage() {
   const { user } = useAuth();
@@ -21,7 +22,7 @@ export function WebAppPage() {
 
   const handlePlanCreated = useCallback((newPlan: TripPlanDetail) => {
     setPlan(newPlan);
-    // Auto-select the recommended route
+    // Auto-select the recommended route.
     const recommended = newPlan.routes.find((r) => r.is_recommended);
     setSelectedRoute(recommended ?? newPlan.routes[0] ?? null);
     setHighlightedCheckpoint(null);
@@ -87,22 +88,20 @@ export function WebAppPage() {
           )}
         </div>
 
-        {/* ── Right Panel (Map placeholder) ──────────────────── */}
-        <div className="flex min-h-[500px] items-center justify-center rounded-xl border border-brand-800/50 bg-brand-900/30 lg:min-h-[700px]">
+        {/* ── Right Panel (Map) ──────────────────────────────── */}
+        <div className="h-[500px] lg:h-[700px]">
           {plan ? (
-            <div className="text-center">
-              <p className="text-brand-300 font-medium">
-                {plan.origin_name} → {plan.destination_name}
-              </p>
-              <p className="mt-2 text-sm text-brand-500">
-                Interactive map with routes, checkpoints, and heatmap
-                will be added in Phase 15.
+            <TripMap
+              routes={plan.routes}
+              selectedRouteId={selectedRoute?.id ?? null}
+              highlightCheckpointId={highlightedCheckpoint}
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center rounded-xl border border-brand-800/50 bg-brand-900/30">
+              <p className="text-sm text-brand-500">
+                Map will appear after you generate routes.
               </p>
             </div>
-          ) : (
-            <p className="text-sm text-brand-500">
-              Map will appear after you generate routes.
-            </p>
           )}
         </div>
       </div>
