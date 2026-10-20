@@ -223,3 +223,9 @@ CSRF_COOKIE_SAMESITE = "Lax"
 if not DEBUG:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
+
+# External routing API settings.
+ROUTING_BASE_URL = os.getenv("ROUTING_BASE_URL", "https://router.project-osrm.org")
+ROUTING_TIMEOUT_SECONDS = float(os.getenv("ROUTING_TIMEOUT_SECONDS", "10"))
+ROUTING_MAX_ALTERNATIVES = int(os.getenv("ROUTING_MAX_ALTERNATIVES", "3"))
+ROUTING_CACHE_TTL_SECONDS = int(os.getenv("ROUTING_CACHE_TTL_SECONDS", "900"))
