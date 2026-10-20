@@ -229,3 +229,8 @@ ROUTING_BASE_URL = os.getenv("ROUTING_BASE_URL", "https://router.project-osrm.or
 ROUTING_TIMEOUT_SECONDS = float(os.getenv("ROUTING_TIMEOUT_SECONDS", "10"))
 ROUTING_MAX_ALTERNATIVES = int(os.getenv("ROUTING_MAX_ALTERNATIVES", "3"))
 ROUTING_CACHE_TTL_SECONDS = int(os.getenv("ROUTING_CACHE_TTL_SECONDS", "900"))
+
+# External geocoding API settings.
+GEOCODING_BASE_URL = os.getenv("GEOCODING_BASE_URL", "https://geocoding-api.open-meteo.com")
+GEOCODING_TIMEOUT_SECONDS = float(os.getenv("GEOCODING_TIMEOUT_SECONDS", "10"))
+GEOCODING_CACHE_TTL_SECONDS = int(os.getenv("GEOCODING_CACHE_TTL_SECONDS", "86400"))
