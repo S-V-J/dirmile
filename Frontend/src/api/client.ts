@@ -156,7 +156,19 @@ export async function getCurrentUser(): Promise<User> {
 }
 
 export async function updateSettings(
-  partial: Partial<Pick<User, "name" | "country_code" | "phone" | "preferred_interval_miles" | "default_load_lb" | "theme">>,
+  partial: Partial<
+    Pick<
+      User,
+      | "name"
+      | "country_code"
+      | "phone"
+      | "preferred_interval_miles"
+      | "default_load_lb"
+      | "theme"
+      | "heatmap_metric"
+      | "map_style"
+    >
+  >,
 ): Promise<User> {
   return request<User>("/account/settings/", {
     method: "PATCH",

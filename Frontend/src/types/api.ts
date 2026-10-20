@@ -54,6 +54,8 @@ export interface User {
   preferred_interval_miles: 10 | 25 | 50;
   default_load_lb: number;
   theme: "light" | "dark" | "system";
+  heatmap_metric: "risk" | "wind" | "rain" | "snow";
+  map_style: "streets" | "satellite" | "terrain";
   is_staff: boolean;
   is_active: boolean;
   date_joined: string;
