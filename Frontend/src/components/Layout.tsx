@@ -1,6 +1,7 @@
 import { Link, Outlet, useLocation } from "react-router";
 
 import { useAuth } from "../auth/useAuth";
+import { InstallBanner } from "./InstallBanner";
 
 /**
  * Top-level layout shell.
@@ -102,6 +103,8 @@ export function Layout() {
       <footer className="border-t border-brand-800/40 bg-brand-950 py-4 text-center text-xs text-brand-400">
         Dirmile · Weather-aware truck routing · MIT License
       </footer>
+
+      <InstallBanner />
     </div>
   );
 }

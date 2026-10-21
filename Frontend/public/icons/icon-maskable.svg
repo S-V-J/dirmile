@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e3a5f"/>
+    </linearGradient>
+    <linearGradient id="road" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#0ea5e9"/>
+    </linearGradient>
+  </defs>
+  <!-- Background rounded square -->
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <!-- Route path (curved road) -->
+  <path d="M140 380 C140 380 180 280 256 256 C332 232 372 132 372 132"
+        fill="none" stroke="url(#road)" stroke-width="28"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Origin marker -->
+  <circle cx="140" cy="380" r="22" fill="#22c55e"/>
+  <circle cx="140" cy="380" r="12" fill="#ffffff"/>
+  <!-- Destination marker -->
+  <circle cx="372" cy="132" r="22" fill="#f97316"/>
+  <circle cx="372" cy="132" r="12" fill="#ffffff"/>
+  <!-- Truck silhouette (simplified) -->
+  <g transform="translate(220, 220) rotate(-25)">
+    <rect x="0" y="8" width="44" height="28" rx="4" fill="#e2e8f0"/>
+    <rect x="44" y="14" width="20" height="22" rx="3" fill="#94a3b8"/>
+    <circle cx="12" cy="40" r="7" fill="#334155"/>
+    <circle cx="36" cy="40" r="7" fill="#334155"/>
+    <circle cx="56" cy="40" r="7" fill="#334155"/>
+  </g>
+  <!-- Weather cloud accent -->
+  <g transform="translate(320, 300)" opacity="0.7">
+    <ellipse cx="30" cy="20" rx="28" ry="16" fill="#475569"/>
+    <ellipse cx="18" cy="24" rx="16" ry="12" fill="#475569"/>
+    <ellipse cx="42" cy="24" rx="16" ry="12" fill="#475569"/>
+    <!-- Rain drops -->
+    <line x1="20" y1="38" x2="18" y2="48" stroke="#38bdf8" stroke-width="3" stroke-linecap="round"/>
+    <line x1="30" y1="38" x2="28" y2="50" stroke="#38bdf8" stroke-width="3" stroke-linecap="round"/>
+    <line x1="40" y1="38" x2="38" y2="48" stroke="#38bdf8" stroke-width="3" stroke-linecap="round"/>
+  </g>
+</svg>
