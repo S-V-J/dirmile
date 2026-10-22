@@ -1,0 +1,407 @@
+#!/usr/bin/env bash
+# ============================================================================
+# dirmile — application lifecycle manager
+#
+# Usage:
+#   dirmile start       Allocate a free port, rebuild frontend if needed,
+#                       collect Django static files, start Django in the
+#                       background (serving API + React SPA), print the URL.
+#   dirmile stop        Kill the Django process tree, clean runtime files.
+#   dirmile restart     stop + start.
+#   dirmile status      Show whether the app is running, on which port/URL.
+#   dirmile logs        Tail the log file (Ctrl+C to stop).
+#   dirmile enable      Install a systemd user service for auto-run on boot.
+#   dirmile disable     Remove the systemd user service.
+#
+# Design rules:
+#   - No hardcoded port. Always allocates a free ephemeral port.
+#   - No auto-run by default. The app only runs when you say dirmile start.
+#   - Frontend is rebuilt automatically when any source file is newer than
+#     the last build artifact.
+#   - sw.js is served with Cache-Control: no-cache by Django, and the
+#     service worker uses skipWaiting + clientsClaim + autoUpdate, so
+#     browsers pick up every new build without any manual action.
+#   - Django runs with --noreload so the PID we track is the real server.
+#   - All runtime state lives in runtime/ which is .gitignored.
+# ============================================================================
+
+set -euo pipefail
+
+# ── Paths ───────────────────────────────────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="${SCRIPT_DIR}"
+BACKEND_DIR="${PROJECT_ROOT}/Backend"
+FRONTEND_DIR="${PROJECT_ROOT}/Frontend"
+RUNTIME_DIR="${PROJECT_ROOT}/runtime"
+LOG_DIR="${PROJECT_ROOT}/logs"
+PID_FILE="${RUNTIME_DIR}/dirmile.pid"
+PORT_FILE="${RUNTIME_DIR}/dirmile.port"
+LOG_FILE="${LOG_DIR}/dirmile.log"
+VENV_DIR="${PROJECT_ROOT}/venv"
+VENV_ACTIVATE="${VENV_DIR}/bin/activate"
+BUILD_STAMP="${RUNTIME_DIR}/.build-stamp"
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+die() {
+  echo "[dirmile] ERROR: $*" >&2
+  exit 1
+}
+
+info() {
+  echo "[dirmile] $*"
+}
+
+ensure_dirs() {
+  mkdir -p "${RUNTIME_DIR}" "${LOG_DIR}"
+}
+
+activate_venv() {
+  if [[ ! -f "${VENV_ACTIVATE}" ]]; then
+    die "Virtualenv not found at ${VENV_DIR}. Run: python3 -m venv venv && pip install -r requirements.txt"
+  fi
+  # shellcheck disable=SC1090
+  source "${VENV_ACTIVATE}"
+}
+
+allocate_port() {
+  python3 - <<'PY'
+import socket
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", 0))
+port = s.getsockname()[1]
+s.close()
+print(port)
+PY
+}
+
+is_running() {
+  if [[ ! -f "${PID_FILE}" ]]; then
+    return 1
+  fi
+  local pid
+  pid="$(cat "${PID_FILE}" 2>/dev/null)" || return 1
+  if [[ -z "${pid}" ]]; then
+    return 1
+  fi
+  kill -0 "${pid}" 2>/dev/null
+}
+
+current_port() {
+  if [[ -f "${PORT_FILE}" ]]; then
+    tr -d '\r\n' < "${PORT_FILE}"
+  fi
+}
+
+# ── Frontend rebuild check ───────────────────────────────────────────────────
+
+needs_frontend_rebuild() {
+  if [[ ! -f "${BUILD_STAMP}" ]]; then
+    return 0
+  fi
+  if [[ ! -d "${FRONTEND_DIR}/dist" ]] || [[ ! -f "${FRONTEND_DIR}/dist/index.html" ]]; then
+    return 0
+  fi
+
+  local stamp_mtime
+  stamp_mtime="$(stat -c %Y "${BUILD_STAMP}" 2>/dev/null)" || return 0
+
+  local newest
+  newest="$(find "${FRONTEND_DIR}/src" "${FRONTEND_DIR}/public" "${FRONTEND_DIR}/index.html" "${FRONTEND_DIR}/vite.config.ts" \
+              -type f \
+              -printf '%T@\n' 2>/dev/null \
+            | sort -n | tail -n 1)"
+
+  if [[ -z "${newest}" ]]; then
+    return 1
+  fi
+
+  local newest_int
+  newest_int="${newest%%.*}"
+
+  if (( newest_int > stamp_mtime )); then
+    return 0
+  fi
+
+  return 1
+}
+
+rebuild_frontend() {
+  info "Rebuilding frontend..."
+  if [[ ! -d "${FRONTEND_DIR}/node_modules" ]]; then
+    info "Installing frontend dependencies..."
+    (cd "${FRONTEND_DIR}" && npm install)
+  fi
+  (cd "${FRONTEND_DIR}" && npm run build)
+  touch "${BUILD_STAMP}"
+  info "Frontend rebuild complete."
+}
+
+collect_static() {
+  info "Collecting Django static files (admin, etc.)..."
+  (
+    cd "${BACKEND_DIR}"
+    python manage.py collectstatic --noinput --clear 2>/dev/null || \
+    python manage.py collectstatic --noinput 2>/dev/null || true
+  )
+  info "Static files collected."
+}
+
+# ── Process management ───────────────────────────────────────────────────────
+
+start_django() {
+  local port="$1"
+  info "Starting Django on 0.0.0.0:${port} (noreload, background)..."
+
+  # Use setsid to create a new process group so we can kill the whole tree.
+  # --noreload prevents Django from spawning a child reloader process.
+  (
+    cd "${BACKEND_DIR}"
+    setsid python manage.py runserver "0.0.0.0:${port}" --noreload \
+      >> "${LOG_FILE}" 2>&1 &
+    echo $! > "${PID_FILE}"
+  )
+
+  # Wait up to 5 seconds for the server to become reachable
+  local waited=0
+  while (( waited < 5 )); do
+    if curl -sf "http://127.0.0.1:${port}/api/health/" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+    (( waited++ ))
+  done
+
+  # Even if health check didn't respond yet, check if process is alive
+  if is_running; then
+    return 0
+  fi
+  return 1
+}
+
+stop_django() {
+  if ! is_running; then
+    return 0
+  fi
+
+  local pid
+  pid="$(cat "${PID_FILE}")"
+  info "Stopping Django (PID ${pid})..."
+
+  # Kill the entire process group (setsid created a new one)
+  kill -- -"${pid}" 2>/dev/null || kill "${pid}" 2>/dev/null || true
+
+  local waited=0
+  while kill -0 "${pid}" 2>/dev/null && (( waited < 5 )); do
+    sleep 1
+    (( waited++ ))
+  done
+
+  if kill -0 "${pid}" 2>/dev/null; then
+    info "Force killing process group."
+    kill -9 -- -"${pid}" 2>/dev/null || kill -9 "${pid}" 2>/dev/null || true
+    sleep 1
+  fi
+
+  rm -f "${PID_FILE}" "${PORT_FILE}"
+  info "Stopped."
+}
+
+# ── Commands ─────────────────────────────────────────────────────────────────
+
+cmd_start() {
+  ensure_dirs
+
+  if is_running; then
+    local pid port
+    pid="$(cat "${PID_FILE}")"
+    port="$(current_port)"
+    info "Already running (PID ${pid}, port ${port})."
+    info "Use 'dirmile restart' to restart, or 'dirmile stop' first."
+    exit 0
+  fi
+
+  # Clean stale files
+  rm -f "${PID_FILE}" "${PORT_FILE}"
+
+  activate_venv
+
+  # Rebuild frontend if source changed
+  if needs_frontend_rebuild; then
+    rebuild_frontend
+  else
+    info "Frontend is up to date (skipping rebuild)."
+  fi
+
+  # Verify frontend build exists
+  if [[ ! -f "${FRONTEND_DIR}/dist/index.html" ]]; then
+    die "Frontend build missing at ${FRONTEND_DIR}/dist/index.html"
+  fi
+
+  collect_static
+
+  # Allocate port
+  local port
+  port="$(allocate_port)"
+  echo "${port}" > "${PORT_FILE}"
+  info "Allocated dynamic port: ${port}"
+
+  # Export port so vite.config.ts proxy can read it (for dev mode)
+  export DIRMILE_BACKEND_PORT="${port}"
+
+  # Start Django
+  if ! start_django "${port}"; then
+    die "Django failed to start. Check ${LOG_FILE}"
+  fi
+
+  local pid
+  pid="$(cat "${PID_FILE}")"
+
+  info "--------------------------------------------"
+  info " Dirmile is running."
+  info " PID:  ${pid}"
+  info " URL:  http://127.0.0.1:${port}/"
+  info " API:  http://127.0.0.1:${port}/api/health/"
+  info " Logs: ${LOG_FILE}"
+  info "--------------------------------------------"
+  info "Stop with:    dirmile stop"
+  info "Restart with: dirmile restart"
+  info ""
+  info "Browser note: sw.js is served with no-cache headers."
+  info "The service worker uses autoUpdate + skipWaiting + clientsClaim."
+  info "After 'dirmile restart', open the URL and the browser will"
+  info "automatically load the new build. No DevTools needed."
+}
+
+cmd_stop() {
+  activate_venv 2>/dev/null || true
+  stop_django
+  info "Done."
+}
+
+cmd_restart() {
+  cmd_stop
+  cmd_start
+}
+
+cmd_status() {
+  if is_running; then
+    local pid port
+    pid="$(cat "${PID_FILE}")"
+    port="$(current_port)"
+    echo "running"
+    echo "pid=${pid}"
+    echo "port=${port}"
+    echo "url=http://127.0.0.1:${port}/"
+    echo "api=http://127.0.0.1:${port}/api/health/"
+    echo "log=${LOG_FILE}"
+    # Quick health check
+    if curl -sf "http://127.0.0.1:${port}/api/health/" >/dev/null 2>&1; then
+      echo "health=ok"
+    else
+      echo "health=unreachable"
+    fi
+  else
+    echo "stopped"
+    if [[ -f "${PID_FILE}" ]]; then
+      echo "note=stale PID file present"
+    fi
+  fi
+}
+
+cmd_logs() {
+  if [[ ! -f "${LOG_FILE}" ]]; then
+    die "No log file at ${LOG_FILE}. Start the app first: dirmile start"
+  fi
+  tail -f "${LOG_FILE}"
+}
+
+cmd_enable() {
+  local unit_dir="${HOME}/.config/systemd/user"
+  local unit_file="${unit_dir}/dirmile.service"
+
+  mkdir -p "${unit_dir}"
+
+  cat > "${unit_file}" <<UNIT
+[Unit]
+Description=Dirmile application server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=${BACKEND_DIR}
+ExecStart=${VENV_DIR}/bin/python manage.py runserver 0.0.0.0:8000 --noreload
+Restart=on-failure
+RestartSec=3
+StandardOutput=append:${LOG_FILE}
+StandardError=append:${LOG_FILE}
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
+UNIT
+
+  info "Systemd user service written to: ${unit_file}"
+  info "To enable auto-run on login, run:"
+  info "  systemctl --user daemon-reload"
+  info "  systemctl --user enable dirmile.service"
+  info "To start now:"
+  info "  systemctl --user start dirmile.service"
+  info ""
+  info "NOTE: systemd service uses a fixed port (8000)."
+  info "      For dynamic port allocation, prefer 'dirmile start'."
+}
+
+cmd_disable() {
+  local unit_file="${HOME}/.config/systemd/user/dirmile.service"
+  if [[ -f "${unit_file}" ]]; then
+    systemctl --user disable dirmile.service 2>/dev/null || true
+    systemctl --user stop dirmile.service 2>/dev/null || true
+    rm -f "${unit_file}"
+    systemctl --user daemon-reload 2>/dev/null || true
+    info "Systemd user service removed."
+  else
+    info "No systemd user service found. Nothing to disable."
+  fi
+}
+
+# ── Main dispatch ────────────────────────────────────────────────────────────
+
+usage() {
+  cat <<'USAGE'
+dirmile — application lifecycle manager
+
+Usage:
+  dirmile start       Start the app on a dynamic free port
+  dirmile stop        Stop the running app
+  dirmile restart     Stop then start (rebuilds frontend if source changed)
+  dirmile status      Show running state, PID, port, URL, health
+  dirmile logs        Tail the log file
+  dirmile enable      Install systemd user service (opt-in auto-run)
+  dirmile disable     Remove systemd user service
+
+By default the app does NOT run in the background.
+Use 'dirmile start' to launch it and 'dirmile stop' to shut it down.
+
+Browser auto-update:
+  After 'dirmile restart', the browser automatically loads the new
+  build on the next page visit. No DevTools, no manual cache clearing.
+  This works because:
+    - sw.js is served with Cache-Control: no-cache
+    - The service worker uses skipWaiting + clientsClaim + autoUpdate
+    - vite-plugin-pwa reloads the page when a new SW activates
+USAGE
+}
+
+case "${1:-}" in
+  start)   cmd_start ;;
+  stop)    cmd_stop ;;
+  restart) cmd_restart ;;
+  status)  cmd_status ;;
+  logs)    cmd_logs ;;
+  enable)  cmd_enable ;;
+  disable) cmd_disable ;;
+  ""|-h|--help|help) usage ;;
+  *)       die "Unknown command: $1. Run 'dirmile' for usage." ;;
+esac

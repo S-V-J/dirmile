@@ -1,265 +1,165 @@
+"""
+Views for serving the built React SPA from Frontend/dist/.
+
+Dirmile uses a single Django process to serve:
+  - /api/*          -> Django REST Framework endpoints
+  - /admin/*        -> Django admin
+  - /static/*       -> Django's own static files (via WhiteNoise)
+  - /sw.js          -> Service worker (no-cache, forces browser update)
+  - /assets/*       -> Hashed JS/CSS bundles (immutable cache)
+  - /icons/*        -> PWA icons (short cache)
+  - /*              -> index.html (SPA fallback for React Router)
+
+Cache policy (must stay in sync with Backend/core/test_frontend.py):
+  assets/*, workbox-*            -> public, max-age=31536000, immutable
+                                    (filename carries the content hash)
+  *.png/.jpg/.svg/.ico/.woff2...  -> public, max-age=86400
+                                    (NOT hashed, so they must expire)
+  manifest, offline.html, *.map   -> no-cache
+  sw.js                           -> no-cache, no-store, must-revalidate
+  index.html                      -> no-cache, no-store, must-revalidate
+
+The dirmile CLI rebuilds the frontend and restarts Django. Because sw.js is
+served no-cache and the worker uses skipWaiting + clientsClaim + autoUpdate,
+browsers pick up every new build with no manual action.
+"""
+
 from __future__ import annotations
 
 import mimetypes
 from pathlib import Path
+from urllib.parse import unquote
 
 from django.conf import settings
-from django.http import FileResponse, Http404, HttpResponse
-from django.views.decorators.http import require_GET
+from django.http import Http404, HttpResponse
 
-INDEX_NAME = "index.html"
+IMMUTABLE_MAX_AGE = 31536000  # 1 year - content-hashed bundles
+STATIC_ASSET_MAX_AGE = 86400  # 1 day - un-hashed images/fonts/icons
 
-# Paths that must never be swallowed by the SPA fallback.
-RESERVED_PREFIXES = ("api/", "admin/", "static/", "media/")
+_IMMUTABLE_PREFIXES = ("assets/", "workbox-")
+_STATIC_ASSET_SUFFIXES = (
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif",
+    ".svg", ".ico",
+    ".woff", ".woff2", ".ttf", ".otf",
+)
+_NO_CACHE = "no-cache, no-store, must-revalidate"
 
-# Ensure common frontend MIME types are available even on minimal systems.
-mimetypes.add_type("application/manifest+json", ".webmanifest")
-mimetypes.add_type("image/svg+xml", ".svg")
-mimetypes.add_type("text/javascript", ".js")
-mimetypes.add_type("text/javascript", ".mjs")
-mimetypes.add_type("text/css", ".css")
-mimetypes.add_type("application/json", ".json")
-mimetypes.add_type("font/woff2", ".woff2")
+_SPECIAL_CONTENT_TYPES = {
+    ".webmanifest": "application/manifest+json",
+    ".mjs": "application/javascript",
+    ".map": "application/json",
+}
 
 
-def _dist_dir() -> Path | None:
-    """
-    Return the configured frontend build directory, if present.
-    """
+def _dist_root() -> Path:
+    """Absolute path to Frontend/dist/. Raises Http404 if unusable."""
     dist = getattr(settings, "FRONTEND_DIST_DIR", None)
     if not dist:
-        return None
-    return Path(dist)
+        raise Http404("FRONTEND_DIST_DIR is not configured.")
+    dist = Path(dist)
+    if not dist.is_dir():
+        raise Http404(
+            "Frontend build directory not found. "
+            "Run: dirmile start (or: cd Frontend && npm run build)"
+        )
+    return dist
 
 
-def _index_path() -> Path | None:
-    """
-    Return the frontend index.html path if the build exists.
-    """
-    dist = _dist_dir()
-    if dist is None:
-        return None
-
-    index = dist / INDEX_NAME
-    if index.is_file():
-        return index
-
-    return None
-
-
-def _not_built_response() -> HttpResponse:
-    """
-    Friendly development response when frontend build is missing.
-    """
-    return HttpResponse(
-        "Frontend build not found. Run `npm run build` inside Frontend/.",
-        status=503,
-        content_type="text/plain; charset=utf-8",
-    )
+def _safe_resolve(dist: Path, rel_path: str) -> Path:
+    """Resolve rel_path inside dist/ and verify it is a real file."""
+    rel_path = unquote(rel_path).lstrip("/")
+    if not rel_path or "\x00" in rel_path:
+        raise Http404("Empty path.")
+    target = (dist / rel_path).resolve()
+    try:
+        target.relative_to(dist.resolve())
+    except ValueError:
+        raise Http404("Path escapes frontend build directory.")
+    if not target.is_file():
+        raise Http404(f"File not found: {rel_path}")
+    return target
 
 
-def _safe_dist_path(relative_path: str) -> Path:
-    """
-    Resolve a requested frontend asset path safely inside FRONTEND_DIST_DIR.
+def _safe_dist_path(rel_path: str) -> Path:
+    """Public helper: resolve against the configured dist dir (Http404 on escape)."""
+    return _safe_resolve(_dist_root(), rel_path)
 
-    This prevents path traversal attacks such as:
-        /../Backend/config/settings.py
-        /..%2F..%2Fetc%2Fpasswd
-    """
-    dist = _dist_dir()
-    if dist is None:
-        raise Http404("Frontend build is not configured.")
 
-    dist = dist.resolve()
+def _guess_content_type(path: Path) -> str:
+    ct, _ = mimetypes.guess_type(str(path))
+    if ct is None:
+        ct = _SPECIAL_CONTENT_TYPES.get(path.suffix.lower(), "application/octet-stream")
+    return ct
 
-    cleaned = (relative_path or "").replace("\\", "/")
 
-    while cleaned.startswith("/"):
-        cleaned = cleaned[1:]
+def _cache_control_for(rel_path: str) -> str:
+    lower = unquote(rel_path).lstrip("/").lower()
+    if lower.startswith(_IMMUTABLE_PREFIXES):
+        return f"public, max-age={IMMUTABLE_MAX_AGE}, immutable"
+    if lower.endswith(_STATIC_ASSET_SUFFIXES):
+        return f"public, max-age={STATIC_ASSET_MAX_AGE}"
+    return "no-cache"
 
+
+def _looks_like_file(path: str) -> bool:
+    """True when the last path segment has an extension. Such paths must
+    never be answered with index.html, or a broken bundle URL becomes a
+    confusing 'Unexpected token <' error in the browser."""
+    cleaned = unquote(path).rstrip("/")
     if not cleaned:
-        raise Http404("Frontend asset path is required.")
-
-    candidate = (dist / cleaned).resolve()
-
-    try:
-        candidate.relative_to(dist)
-    except ValueError as exc:
-        raise Http404("Invalid frontend asset path.") from exc
-
-    if not candidate.is_file():
-        raise Http404("Frontend asset not found.")
-
-    return candidate
+        return False
+    return "." in cleaned.rsplit("/", 1)[-1]
 
 
-def _content_type(path: Path) -> str:
-    """
-    Return a suitable Content-Type for a frontend file.
-    """
-    guessed, _ = mimetypes.guess_type(str(path))
-    suffix = path.suffix.lower()
+# ── SPA fallback ─────────────────────────────────────────────────────
 
-    if not guessed:
-        guessed = {
-            ".webmanifest": "application/manifest+json",
-            ".svg": "image/svg+xml",
-            ".js": "text/javascript",
-            ".mjs": "text/javascript",
-            ".css": "text/css",
-            ".html": "text/html",
-            ".htm": "text/html",
-            ".json": "application/json",
-            ".map": "application/json",
-            ".png": "image/png",
-            ".jpg": "image/jpeg",
-            ".jpeg": "image/jpeg",
-            ".webp": "image/webp",
-            ".gif": "image/gif",
-            ".ico": "image/x-icon",
-            ".woff": "font/woff",
-            ".woff2": "font/woff2",
-            ".ttf": "font/ttf",
-            ".otf": "font/otf",
-        }.get(suffix, "application/octet-stream")
-
-    if guessed.startswith(
-        (
-            "text/",
-            "application/json",
-            "application/manifest+json",
-            "image/svg+xml",
-        )
-    ):
-        return f"{guessed}; charset=utf-8"
-
-    return guessed
-
-
-def _cache_control(relative_path: str) -> str:
-    """
-    Return cache headers suitable for frontend assets.
-
-    Hashed Vite assets can be cached immutably.
-    Service worker, manifest, index.html, and offline.html should not be cached
-    aggressively because they control app updates.
-    """
-    normalized = (relative_path or "").replace("\\", "/").lstrip("/")
-    name = Path(normalized).name
-
-    if normalized.startswith("assets/"):
-        return "public, max-age=31536000, immutable"
-
-    if name.startswith("workbox-"):
-        return "public, max-age=31536000, immutable"
-
-    if name in {
-        "sw.js",
-        "sw.js.map",
-        "manifest.webmanifest",
-        "index.html",
-        "offline.html",
-        "favicon.svg",
-        "favicon.ico",
-    }:
-        return "no-cache, no-store, must-revalidate"
-
-    if normalized.startswith("icons/"):
-        return "public, max-age=86400"
-
-    return "no-cache, no-store, must-revalidate"
-
-
-def _serve_file(path: Path, relative_path: str) -> FileResponse:
-    """
-    Serve a file from the frontend build directory.
-
-    IMPORTANT:
-    Django's FileResponse requires a *file-like object*, not a filesystem path.
-    Passing a Path raises:
-        TypeError: 'PosixPath' object is not iterable
-    because StreamingHttpResponse tries to iterate it as streaming_content.
-
-    Django closes the opened handle automatically when the response finishes
-    streaming, so this file must NOT be wrapped in a `with` block.
-    """
-    handle = path.open("rb")
+def spa_index(request, **kwargs):
+    """Serve dist/index.html for every non-API, non-asset route so React
+    Router can handle /login, /register, /app, /settings, etc."""
+    rel = request.path_info.lstrip("/")
+    if _looks_like_file(rel):
+        raise Http404("Not found.")
 
     try:
-        response = FileResponse(
-            handle,
-            content_type=_content_type(path),
-            filename=path.name,
+        index = _safe_dist_path("index.html")
+    except Http404 as exc:
+        return HttpResponse(
+            "<!DOCTYPE html><html><head><title>Dirmile</title></head>"
+            "<body style='font-family:sans-serif;padding:2rem'>"
+            "<h1>Dirmile</h1>"
+            f"<p>{exc}</p>"
+            "<p>Run <code>dirmile start</code> to build and launch.</p>"
+            "</body></html>",
+            status=503,
+            content_type="text/html; charset=utf-8",
         )
-    except Exception:
-        # Only reachable if construction itself fails; Django would have owned
-        # the handle otherwise.
-        handle.close()
-        raise
 
-    cache_control = _cache_control(relative_path)
-    response["Cache-Control"] = cache_control
-
-    if cache_control.startswith("no-cache"):
-        response["Pragma"] = "no-cache"
-        response["Expires"] = "0"
-
+    response = HttpResponse(index.read_bytes(), content_type="text/html; charset=utf-8")
+    response["Cache-Control"] = _NO_CACHE
+    response["Pragma"] = "no-cache"
+    response["Expires"] = "0"
     return response
 
 
-@require_GET
-def frontend_index(request):
-    """
-    Serve Frontend/dist/index.html for the root URL.
-    """
-    index = _index_path()
-    if index is None:
-        return _not_built_response()
+# ── Service worker ───────────────────────────────────────────────────
 
-    return _serve_file(index, INDEX_NAME)
-
-
-@require_GET
-def frontend_static(request, path: str):
-    """
-    Serve a concrete file from Frontend/dist.
-
-    Examples:
-        /assets/index-abc123.js
-        /icons/icon-192.png
-        /sw.js
-        /manifest.webmanifest
-        /offline.html
-    """
-    file_path = _safe_dist_path(path)
-    return _serve_file(file_path, path)
+def serve_sw(request, **kwargs):
+    """sw.js is always revalidated, so a new build activates immediately."""
+    sw = _safe_dist_path("sw.js")
+    response = HttpResponse(sw.read_bytes(), content_type="application/javascript; charset=utf-8")
+    response["Cache-Control"] = _NO_CACHE
+    response["Pragma"] = "no-cache"
+    response["Expires"] = "0"
+    response["Service-Worker-Allowed"] = "/"
+    return response
 
 
-@require_GET
-def frontend_spa(request, route: str = ""):
-    """
-    SPA fallback.
+# ── Generic dist file server ─────────────────────────────────────────
 
-    For extensionless routes such as:
-        /app
-        /settings
-        /account
-        /about
-        /login
-        /register
-
-    Return index.html so React Router can handle the route.
-
-    Reserved backend prefixes are rejected with 404 instead of HTML so that a
-    mistyped API URL never masquerades as a successful page load.
-    """
-    normalized = (route or "").lstrip("/")
-
-    if normalized.startswith(RESERVED_PREFIXES):
-        raise Http404("Not found.")
-
-    index = _index_path()
-    if index is None:
-        return _not_built_response()
-
-    return _serve_file(index, INDEX_NAME)
+def serve_dist_file(request, file_path: str = "", **kwargs):
+    """Serve any file from Frontend/dist/ by relative path, applying the
+    cache policy in _cache_control_for()."""
+    fp = _safe_dist_path(file_path)
+    response = HttpResponse(fp.read_bytes(), content_type=_guess_content_type(fp))
+    response["Cache-Control"] = _cache_control_for(file_path)
+    return response

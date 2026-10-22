@@ -34,7 +34,6 @@ if not SECRET_KEY:
         raise RuntimeError("SECRET_KEY must be set when DEBUG=False.")
 
 ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", "localhost,127.0.0.1")
-
 if DEBUG and "testserver" not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append("testserver")
 
@@ -44,7 +43,6 @@ CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS", "")
 
 # CORS settings.
 # Local dynamic ports are allowed by regex.
-# For frontend dev server or tunnel domain, add explicit origins to CORS_ALLOWED_ORIGINS in .env.
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", "")
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGIN_REGEXES = [
@@ -112,10 +110,9 @@ DATABASES = {
 AUTH_USER_MODEL = "accounts.User"
 
 # Use only Dirmile's authentication backend.
-# DirmileAuthBackend inherits from ModelBackend, so it can still handle
-# normal Django authentication while also supporting email/username/phone login.
 AUTHENTICATION_BACKENDS = [
     "accounts.backends.DirmileAuthBackend",
+    "django.contrib.auth.backends.ModelBackend",
 ]
 
 AUTH_PASSWORD_VALIDATORS = [
@@ -138,18 +135,17 @@ TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
 
+# ── Static files ─────────────────────────────────────────────────────
+# Django's own static files (admin CSS/JS) are served by WhiteNoise
+# from STATIC_ROOT after collectstatic.
+#
+# The React frontend build (Frontend/dist/) is served DIRECTLY by
+# core.frontend views at /assets/, /sw.js, /icons/, etc.
+# It is NOT included in STATICFILES_DIRS to avoid duplication.
+
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-
-# Prevent WhiteNoise warning during development/tests.
-STATIC_ROOT.mkdir(parents=True, exist_ok=True)
-
-# Later, the built React frontend will be served from Frontend/dist.
-FRONTEND_DIST_DIR = PROJECT_ROOT / "Frontend" / "dist"
-STATICFILES_DIRS = []
-
-if FRONTEND_DIST_DIR.exists():
-    STATICFILES_DIRS.append(FRONTEND_DIST_DIR)
+STATICFILES_DIRS = []  # Django's own extra static dirs only (currently none)
 
 STORAGES = {
     "default": {
@@ -162,6 +158,12 @@ STORAGES = {
 
 if DEBUG:
     WHITENOISE_AUTOREFRESH = True
+
+# Prevent WhiteNoise warning during development/tests.
+STATIC_ROOT.mkdir(parents=True, exist_ok=True)
+
+# Path to the built React SPA. Served by core.frontend views.
+FRONTEND_DIST_DIR = PROJECT_ROOT / "Frontend" / "dist"
 
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
@@ -193,7 +195,6 @@ CACHES = {
 }
 
 # Django 6.1 mailer configuration.
-# Console backend is safe for local development and does not send real email.
 MAILERS = {
     "default": {
         "BACKEND": "django.core.mail.backends.console.EmailBackend",
@@ -216,7 +217,6 @@ LOGGING = {
 
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
-
 CSRF_COOKIE_HTTPONLY = False
 CSRF_COOKIE_SAMESITE = "Lax"
 
@@ -230,18 +230,18 @@ ROUTING_TIMEOUT_SECONDS = float(os.getenv("ROUTING_TIMEOUT_SECONDS", "10"))
 ROUTING_MAX_ALTERNATIVES = int(os.getenv("ROUTING_MAX_ALTERNATIVES", "3"))
 ROUTING_CACHE_TTL_SECONDS = int(os.getenv("ROUTING_CACHE_TTL_SECONDS", "900"))
 
-# External geocoding API settings.
-GEOCODING_BASE_URL = os.getenv("GEOCODING_BASE_URL", "https://geocoding-api.open-meteo.com")
-GEOCODING_TIMEOUT_SECONDS = float(os.getenv("GEOCODING_TIMEOUT_SECONDS", "10"))
-GEOCODING_CACHE_TTL_SECONDS = int(os.getenv("GEOCODING_CACHE_TTL_SECONDS", "86400"))
-
-# External weather forecast API settings.
+# ── External weather API settings ────────────────────────────────────
 WEATHER_BASE_URL = os.getenv("WEATHER_BASE_URL", "https://api.open-meteo.com")
 WEATHER_TIMEOUT_SECONDS = float(os.getenv("WEATHER_TIMEOUT_SECONDS", "15"))
 WEATHER_CACHE_TTL_SECONDS = int(os.getenv("WEATHER_CACHE_TTL_SECONDS", "900"))
 WEATHER_MAX_BATCH_COORDINATES = int(os.getenv("WEATHER_MAX_BATCH_COORDINATES", "1000"))
 
-# Trip plan service settings.
+# ── External geocoding API settings ──────────────────────────────────
+GEOCODING_BASE_URL = os.getenv("GEOCODING_BASE_URL", "https://geocoding-api.open-meteo.com")
+GEOCODING_TIMEOUT_SECONDS = float(os.getenv("GEOCODING_TIMEOUT_SECONDS", "10"))
+GEOCODING_CACHE_TTL_SECONDS = int(os.getenv("GEOCODING_CACHE_TTL_SECONDS", "86400"))
+
+# ── Trip plan limits ─────────────────────────────────────────────────
 PLAN_MAX_HEATMAP_POINTS = int(os.getenv("PLAN_MAX_HEATMAP_POINTS", "500"))
 PLAN_HEATMAP_HOURS = int(os.getenv("PLAN_HEATMAP_HOURS", "49"))
 PLAN_WEATHER_BUFFER_HOURS = float(os.getenv("PLAN_WEATHER_BUFFER_HOURS", "2"))

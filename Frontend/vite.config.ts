@@ -10,10 +10,21 @@ function getBackendPort(): string {
   if (process.env.DIRMILE_BACKEND_PORT) {
     return process.env.DIRMILE_BACKEND_PORT;
   }
-  const runtimePortFile = resolve(__dirname, "..", "runtime", "dev-port");
+  const runtimePortFile = resolve(__dirname, "..", "runtime", "dirmile.port");
   if (existsSync(runtimePortFile)) {
     try {
       const port = readFileSync(runtimePortFile, "utf-8").trim();
+      if (port && /^\d+$/.test(port)) {
+        return port;
+      }
+    } catch {
+      // ignore
+    }
+  }
+  const legacyPortFile = resolve(__dirname, "..", "runtime", "dev-port");
+  if (existsSync(legacyPortFile)) {
+    try {
+      const port = readFileSync(legacyPortFile, "utf-8").trim();
       if (port && /^\d+$/.test(port)) {
         return port;
       }
@@ -31,7 +42,9 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      registerType: "prompt",
+      // autoUpdate: SW installs and activates silently,
+      // then reloads the page. No user prompt, no DevTools.
+      registerType: "autoUpdate",
       includeAssets: ["favicon.svg", "offline.html"],
       manifest: {
         name: "Dirmile",
@@ -74,16 +87,20 @@ export default defineConfig({
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
         navigateFallback: "/offline.html",
         navigateFallbackDenylist: [/^\/api/],
+        // Ensure SW itself is never cached by the browser
+        // (Django also sends no-cache headers for sw.js)
+        cleanupOutdatedCaches: true,
+        skipWaiting: true,
+        clientsClaim: true,
         runtimeCaching: [
           {
-            // Cache OpenStreetMap tiles
             urlPattern: /^https:\/\/tile\.openstreetmap\.org\/.*/i,
             handler: "CacheFirst",
             options: {
               cacheName: "osm-tiles",
               expiration: {
                 maxEntries: 200,
-                maxAgeSeconds: 60 * 60 * 24 * 7, // 7 days
+                maxAgeSeconds: 60 * 60 * 24 * 7,
               },
               cacheableResponse: {
                 statuses: [0, 200],
@@ -91,7 +108,6 @@ export default defineConfig({
             },
           },
           {
-            // Network-first for API calls (never cache private data)
             urlPattern: /^\/api\/.*/i,
             handler: "NetworkFirst",
             options: {
@@ -99,7 +115,7 @@ export default defineConfig({
               networkTimeoutSeconds: 10,
               expiration: {
                 maxEntries: 50,
-                maxAgeSeconds: 60 * 60 * 24, // 1 day
+                maxAgeSeconds: 60 * 60 * 24,
               },
               cacheableResponse: {
                 statuses: [0, 200],
@@ -109,7 +125,7 @@ export default defineConfig({
         ],
       },
       devOptions: {
-        enabled: false, // Disable SW in dev to avoid confusion
+        enabled: false,
       },
     }),
   ],

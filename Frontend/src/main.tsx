@@ -6,32 +6,14 @@ import App from "./App";
 import "./index.css";
 
 // ── Service Worker Registration ──────────────────────────────────────
-// vite-plugin-pwa exposes a virtual module that handles registration.
-// registerType: "prompt" means we control when updates are applied.
-const updateSW = registerSW({
-  onNeedRefresh() {
-    // Show a lightweight toast-like notification
-    if (
-      typeof window !== "undefined" &&
-      confirm("A new version of Dirmile is available. Reload to update?")
-    ) {
-      void updateSW(true);
-    }
-  },
+// registerType: "autoUpdate" in vite.config.ts means the SW
+// automatically installs, activates, claims clients, and reloads
+// the page when a new version is detected.
+// No user prompt. No DevTools. No manual clearing.
+registerSW({
+  immediate: true,
   onOfflineReady() {
     console.info("[PWA] Dirmile is ready to work offline.");
-  },
-  onRegisteredSW(swUrl, registration) {
-    console.info("[PWA] Service worker registered:", swUrl);
-    // Optional: check for updates every 60 minutes while the tab is open
-    if (registration) {
-      setInterval(
-        () => {
-          void registration.update();
-        },
-        60 * 60 * 1000,
-      );
-    }
   },
   onRegisterError(error) {
     console.warn("[PWA] Service worker registration failed:", error);
@@ -39,13 +21,11 @@ const updateSW = registerSW({
 });
 
 // ── Install Prompt Handling ──────────────────────────────────────────
-// Capture the beforeinstallprompt event so we can trigger it from UI.
 let deferredInstallPrompt: Event | null = null;
 
 window.addEventListener("beforeinstallprompt", (e) => {
   e.preventDefault();
   deferredInstallPrompt = e;
-  // Dispatch a custom event so React components can react
   window.dispatchEvent(new CustomEvent("dirmile:installable"));
 });
 
@@ -54,7 +34,6 @@ window.addEventListener("appinstalled", () => {
   console.info("[PWA] Dirmile was installed successfully.");
 });
 
-// Expose a helper for components to trigger the install dialog
 (window as unknown as Record<string, unknown>).__dirmilePromptInstall =
   async function promptInstall(): Promise<"accepted" | "dismissed" | "unavailable"> {
     if (!deferredInstallPrompt) {
