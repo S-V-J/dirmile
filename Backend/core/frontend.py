@@ -117,7 +117,7 @@ def spa_index(request, **kwargs):
     """Serve dist/index.html for every non-API, non-asset route so React
     Router can handle /login, /register, /app, /settings, etc."""
     rel = request.path_info.lstrip("/")
-    if _looks_like_file(rel):
+    if ".." in rel.split("/") or _looks_like_file(rel):
         raise Http404("Not found.")
 
     try:

@@ -170,7 +170,7 @@ start_django() {
       return 0
     fi
     sleep 1
-    (( waited++ ))
+    waited=$((waited + 1))
   done
 
   # Even if health check didn't respond yet, check if process is alive
@@ -195,7 +195,7 @@ stop_django() {
   local waited=0
   while kill -0 "${pid}" 2>/dev/null && (( waited < 5 )); do
     sleep 1
-    (( waited++ ))
+    waited=$((waited + 1))
   done
 
   if kill -0 "${pid}" 2>/dev/null; then
