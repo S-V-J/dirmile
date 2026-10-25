@@ -317,6 +317,63 @@ cmd_logs() {
   tail -f "${LOG_FILE}"
 }
 
+cmd_tunnel() {
+  if ! is_running; then
+    die "App is not running. Start it first: ./dirmile start"
+  fi
+
+  local port
+  port="$(current_port)"
+  if [[ -z "${port}" ]]; then
+    die "Port file is empty or missing."
+  fi
+
+  local backend_url="http://127.0.0.1:${port}"
+  info "Starting Cloudflare Tunnel -> ${backend_url}"
+
+  local log_file="${LOG_DIR}/tunnel.log"
+  rm -f "${RUNTIME_DIR}/tunnel.url" "${log_file}"
+
+  setsid cloudflared tunnel --no-autoupdate --url "${backend_url}" \
+    >> "${log_file}" 2>&1 &
+  local cfd_pid=$!
+  echo "${cfd_pid}" > "${RUNTIME_DIR}/tunnel.pid"
+
+  info "Waiting for tunnel URL (up to 20s)..."
+  local waited=0
+  local url=""
+
+  while (( waited < 20 )); do
+    sleep 1
+    waited=$((waited + 1))
+
+    # cloudflared 2026.x outputs: https://xxx-yyy-zzz.trycloudflare.com
+    # Extract the full URL from the log
+    url=$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' "${log_file}" | head -n 1)
+
+    if [[ -n "${url}" ]]; then
+      break
+    fi
+  done
+
+  if [[ -z "${url}" ]]; then
+    kill "${cfd_pid}" 2>/dev/null || true
+    rm -f "${RUNTIME_DIR}/tunnel.pid"
+    die "Tunnel failed to produce a URL within 20s. Check ${log_file}"
+  fi
+
+  echo "${url}" > "${RUNTIME_DIR}/tunnel.url"
+
+  info "--------------------------------------------"
+  info " Cloudflare Tunnel is LIVE."
+  info " Public URL: ${url}"
+  info " Backend:    ${backend_url}"
+  info " Tunnel PID: ${cfd_pid}"
+  info " Log:        ${log_file}"
+  info "--------------------------------------------"
+  info "Open ${url} in your browser."
+  info "To stop the tunnel: ./dirmile tunnel-stop"
+}
 cmd_enable() {
   local unit_dir="${HOME}/.config/systemd/user"
   local unit_file="${unit_dir}/dirmile.service"
@@ -400,6 +457,8 @@ case "${1:-}" in
   restart) cmd_restart ;;
   status)  cmd_status ;;
   logs)    cmd_logs ;;
+  tunnel)     cmd_tunnel ;;
+  tunnel-stop) cmd_tunnel_stop ;;
   enable)  cmd_enable ;;
   disable) cmd_disable ;;
   ""|-h|--help|help) usage ;;
