@@ -34,6 +34,11 @@ if not SECRET_KEY:
         raise RuntimeError("SECRET_KEY must be set when DEBUG=False.")
 
 ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", "localhost,127.0.0.1")
+
+# Trust X-Forwarded-Proto header from Cloudflare Tunnel
+# This makes request.is_secure() return True when CF sends https
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
 if DEBUG and "testserver" not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append("testserver")
 
