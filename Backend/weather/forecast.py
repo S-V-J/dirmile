@@ -59,19 +59,27 @@ def _safe_float(value, default: float | None = None) -> float | None:
     return result
 
 
+# Practical per-request coordinate cap for ONE Open-Meteo HTTP call.
+# Open-Meteo documents up to 1000 locations per request, but the service sits
+# behind nginx with an ~8 KB request-line limit. With 6-decimal coordinates
+# (~21 bytes per lat/lng pair) plus the hourly variable list, 200 coordinates
+# produce a ~4.6 KB URL — safely under the limit with ~40% headroom.
+MAX_COORDINATES_PER_REQUEST = 200
+
+
 def _clamp_batch_size(value) -> int:
     """
     Clamp requested batch size to a safe integer range.
     """
     if value is None:
-        value = 1000
+        value = MAX_COORDINATES_PER_REQUEST
 
     try:
         count = int(value)
     except (TypeError, ValueError):
-        count = 1000
+        count = MAX_COORDINATES_PER_REQUEST
 
-    return max(1, min(count, 1000))
+    return max(1, min(count, MAX_COORDINATES_PER_REQUEST))
 
 
 def _format_datetime_iso(dt: datetime) -> str:
@@ -139,9 +147,10 @@ def build_forecast_url(
     if not coordinates:
         raise ValueError("At least one coordinate is required.")
 
-    if len(coordinates) > 1000:
+    if len(coordinates) > MAX_COORDINATES_PER_REQUEST:
         raise ValueError(
-            "Open-Meteo supports a maximum of 1000 coordinates per request."
+            f"A single forecast request supports at most "
+            f"{MAX_COORDINATES_PER_REQUEST} coordinates."
         )
 
     lat_list = []

@@ -33,6 +33,7 @@ echo "[tunnel] Starting cloudflared -> http://127.0.0.1:${BACKEND_PORT}" >&2
 # --no-autoupdate prevents permission issues in WSL/container environments.
 cloudflared tunnel \
   --no-autoupdate \
+  --protocol http2 \
   --url "http://127.0.0.1:${BACKEND_PORT}" \
   2>&1 | tee "${LOG_FILE}" &
 

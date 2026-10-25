@@ -239,7 +239,7 @@ ROUTING_CACHE_TTL_SECONDS = int(os.getenv("ROUTING_CACHE_TTL_SECONDS", "900"))
 WEATHER_BASE_URL = os.getenv("WEATHER_BASE_URL", "https://api.open-meteo.com")
 WEATHER_TIMEOUT_SECONDS = float(os.getenv("WEATHER_TIMEOUT_SECONDS", "15"))
 WEATHER_CACHE_TTL_SECONDS = int(os.getenv("WEATHER_CACHE_TTL_SECONDS", "900"))
-WEATHER_MAX_BATCH_COORDINATES = int(os.getenv("WEATHER_MAX_BATCH_COORDINATES", "1000"))
+WEATHER_MAX_BATCH_COORDINATES = int(os.getenv("WEATHER_MAX_BATCH_COORDINATES", "200"))
 
 # ── External geocoding API settings ──────────────────────────────────
 GEOCODING_BASE_URL = os.getenv("GEOCODING_BASE_URL", "https://geocoding-api.open-meteo.com")

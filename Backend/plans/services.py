@@ -469,10 +469,10 @@ def _fetch_weather_lookup(
         return {}
 
     fn = forecast_fn or default_fetch_forecast
-    max_batch = int(getattr(settings, "WEATHER_MAX_BATCH_COORDINATES", 1000))
+    max_batch = int(getattr(settings, "WEATHER_MAX_BATCH_COORDINATES", 200))
 
     if max_batch <= 0:
-        max_batch = 1000
+        max_batch = 200
 
     results: list[Any] = []
 
