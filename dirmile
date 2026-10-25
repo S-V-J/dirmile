@@ -210,6 +210,80 @@ stop_django() {
 
 # ── Commands ─────────────────────────────────────────────────────────────────
 
+# ── Tunnel internals (called by cmd_start / cmd_stop) ────────────────────────
+_stop_tunnel_quiet() {
+  if [[ -f "${RUNTIME_DIR}/tunnel_wrapper.pid" ]]; then
+    local wpid
+    wpid="$(cat "${RUNTIME_DIR}/tunnel_wrapper.pid")"
+    kill "${wpid}" 2>/dev/null || true
+    wait "${wpid}" 2>/dev/null || true
+    rm -f "${RUNTIME_DIR}/tunnel_wrapper.pid"
+  fi
+  if [[ -f "${RUNTIME_DIR}/tunnel.pid" ]]; then
+    local cpid
+    cpid="$(cat "${RUNTIME_DIR}/tunnel.pid")"
+    kill "${cpid}" 2>/dev/null || true
+    rm -f "${RUNTIME_DIR}/tunnel.pid"
+  fi
+  rm -f "${RUNTIME_DIR}/tunnel.url"
+}
+
+_launch_tunnel() {
+  local port="$1"
+  local backend_url="http://127.0.0.1:${port}"
+
+  _stop_tunnel_quiet
+
+  info "Launching Cloudflare Tunnel via wrapper script..."
+  nohup ./scripts/run-tunnel.sh "${port}" >> "${LOG_FILE}" 2>&1 &
+  local wrapper_pid=$!
+  echo "${wrapper_pid}" > "${RUNTIME_DIR}/tunnel_wrapper.pid"
+
+  # Wait for URL
+  local waited=0
+  local url=""
+  while (( waited < 60 )); do
+    if [[ -f "${RUNTIME_DIR}/tunnel.url" ]]; then
+      url="$(cat "${RUNTIME_DIR}/tunnel.url")"
+      [[ -n "${url}" ]] && break
+    fi
+    sleep 1
+    waited=$((waited + 1))
+    (( waited % 15 == 0 )) && info "Still waiting for tunnel URL... (${waited}s)"
+  done
+
+  if [[ -z "${url}" ]]; then
+    kill "${wrapper_pid}" 2>/dev/null || true
+    rm -f "${RUNTIME_DIR}/tunnel_wrapper.pid" "${RUNTIME_DIR}/tunnel.url"
+    die "Tunnel produced no URL in 60s. Check: tail -30 ${LOG_FILE}"
+  fi
+
+  # Wait for DNS propagation
+  local host_only="${url#https://}"
+  info "Waiting for DNS resolution..."
+  local dns_waited=0
+  while (( dns_waited < 30 )); do
+    if getent hosts "${host_only}" >/dev/null 2>&1; then
+      info "DNS resolved after ${dns_waited}s."
+      break
+    fi
+    sleep 1
+    dns_waited=$((dns_waited + 1))
+  done
+  if (( dns_waited >= 30 )); then
+    info "WARNING: DNS not yet resolved (30s). Browser may still work."
+  fi
+
+  info "--------------------------------------------"
+  info " Cloudflare Tunnel is LIVE."
+  info " Public URL: ${url}"
+  info " Backend:    ${backend_url}"
+  info " Log:        ${LOG_FILE}"
+  info "--------------------------------------------"
+  info "Open ${url} in your browser."
+  info "To stop tunnel only: ./dirmile tunnel-stop"
+}
+
 cmd_start() {
   ensure_dirs
 
@@ -272,9 +346,13 @@ cmd_start() {
   info "The service worker uses autoUpdate + skipWaiting + clientsClaim."
   info "After 'dirmile restart', open the URL and the browser will"
   info "automatically load the new build. No DevTools needed."
+
+  # ── Auto-launch tunnel (single-command workflow) ──
+  _launch_tunnel "${port}"
 }
 
 cmd_stop() {
+  _stop_tunnel_quiet
   activate_venv 2>/dev/null || true
   stop_django
   info "Done."
@@ -318,120 +396,13 @@ cmd_logs() {
 }
 
 cmd_tunnel() {
-  if ! is_running; then
-    die "App is not running. Start it first: ./dirmile start"
-  fi
-
-  local port
-  port="$(current_port)"
-  if [[ -z "${port}" ]]; then
-    die "Port file is empty or missing."
-  fi
-
-  info "Launching Cloudflare Tunnel via wrapper script..."
-  
-  # Execute the wrapper in background. 
-  # It manages its own PID, logs, and URL extraction.
-  # We redirect its stderr to our main log so errors are visible.
-  nohup ./scripts/run-tunnel.sh "${port}" >> "${LOG_FILE}" 2>&1 &
-  
-  # Give it a moment to spawn
-  sleep 2
-
-  local url_file="${RUNTIME_DIR}/tunnel.url"
-  local waited=0
-  local max_wait=60
-
-  info "Waiting for tunnel URL (up to ${max_wait}s)..."
-  
-  while (( waited < max_wait )); do
-    if [[ -f "${url_file}" ]]; then
-      break
-    fi
-    
-    # Check if wrapper died
-    if [[ -f "${RUNTIME_DIR}/tunnel.pid" ]]; then
-      local cfd_pid
-      cfd_pid="$(cat "${RUNTIME_DIR}/tunnel.pid")"
-      if ! kill -0 "${cfd_pid}" 2>/dev/null; then
-        die "Tunnel wrapper crashed. Check ${LOG_FILE}"
-      fi
-    else
-       # If pid file doesn't exist yet, maybe it hasn't started? 
-       # Or maybe it finished and cleaned up? 
-       # If url_file also doesn't exist, it's an error.
-       if (( waited > 5 )); then
-         die "Tunnel wrapper failed to start properly. No PID or URL found."
-       fi
-    fi
-
-    sleep 1
-    waited=$((waited + 1))
-    
-    if (( waited % 10 == 0 )); then
-      info "Still waiting... (${waited}s elapsed)"
-    fi
-  done
-
-  if [[ ! -f "${url_file}" ]]; then
-    die "Timeout waiting for tunnel URL. Check ${LOG_FILE}"
-  fi
-
-  local public_url
-  public_url="$(cat "${url_file}")"
-
-  info "--------------------------------------------"
-  info " Cloudflare Tunnel is LIVE."
-  info " Public URL: ${public_url}"
-  info " Backend:    http://127.0.0.1:${port}"
-  info " Log:        ${LOG_FILE}"
-  info "--------------------------------------------"
-  info "Open ${public_url} in your browser."
-  info "To stop the tunnel: ./dirmile tunnel-stop"
+  # Alias: restart already includes tunnel launch
+  cmd_restart
 }
 cmd_tunnel_stop() {
-  local pid_file="${RUNTIME_DIR}/tunnel.pid"
-  local url_file="${RUNTIME_DIR}/tunnel.url"
-  
-  if [[ ! -f "${pid_file}" ]]; then
-    info "No tunnel PID file found. Nothing to stop."
-    rm -f "${url_file}"
-    return 0
-  fi
-
-  local cfd_pid
-  cfd_pid="$(cat "${pid_file}")"
-  
-  info "Stopping tunnel wrapper (PID ${cfd_pid})..."
-  
-  # Send SIGTERM to the wrapper script.
-  # The wrapper has 'trap' or 'wait' logic to propagate this to cloudflared.
-  # Actually, our wrapper uses 'wait $CFD_PID', so killing the wrapper 
-  # might leave cloudflared orphaned if not careful.
-  # Better: Kill the cloudflared process directly if we know its PID,
-  # OR rely on the wrapper's cleanup. 
-  # Since we stored the CLOUDFLARED PID in the file (inside wrapper), 
-  # let's assume the file contains the cloudflared PID for direct kill safety.
-  
-  kill "${cfd_pid}" 2>/dev/null || true
-  
-  # Wait briefly for graceful shutdown
-  local waited=0
-  while kill -0 "${cfd_pid}" 2>/dev/null && (( waited < 5 )); do
-    sleep 1
-    waited=$((waited + 1))
-  done
-  
-  # Force kill if still hanging
-  if kill -0 "${cfd_pid}" 2>/dev/null; then
-    info "Force killing tunnel process."
-    kill -9 "${cfd_pid}" 2>/dev/null || true
-  fi
-
-  rm -f "${pid_file}" "${url_file}"
-  info "Tunnel stopped."
+  _stop_tunnel_quiet
+  info "Tunnel stopped. App is still running."
 }
-
 cmd_enable() {
   local unit_dir="${HOME}/.config/systemd/user"
   local unit_file="${unit_dir}/dirmile.service"
