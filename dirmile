@@ -158,7 +158,7 @@ start_django() {
   # --noreload prevents Django from spawning a child reloader process.
   (
     cd "${BACKEND_DIR}"
-    setsid python manage.py runserver "0.0.0.0:${port}" --noreload \
+    PYTHONUNBUFFERED=1 setsid python manage.py runserver "0.0.0.0:${port}" --noreload \
       >> "${LOG_FILE}" 2>&1 &
     echo $! > "${PID_FILE}"
   )
