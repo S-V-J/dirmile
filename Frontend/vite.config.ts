@@ -94,7 +94,7 @@ export default defineConfig({
         clientsClaim: true,
         runtimeCaching: [
           {
-            urlPattern: /^https:\/\/tile\.openstreetmap\.org\/.*/i,
+            urlPattern: /\/tiles\//i,
             handler: "CacheFirst",
             options: {
               cacheName: "osm-tiles",

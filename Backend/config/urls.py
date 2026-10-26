@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.urls import include, path, re_path
 
 from core.views import health_check
+from core.tiles import tile_proxy
 from core.frontend import serve_dist_file, serve_sw, spa_index
 
 urlpatterns = [
@@ -13,6 +14,7 @@ urlpatterns = [
 
     # ── Django admin ─────────────────────────────────────────────────
     path("admin/", admin.site.urls),
+    path("tiles/<int:z>/<int:x>/<int:y>.<str:ext>", tile_proxy, name="tile-proxy"),
 
     # ── Service worker (no-cache: browser checks every load) ─────────
     path("sw.js", serve_sw, name="service-worker"),
