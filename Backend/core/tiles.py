@@ -15,7 +15,7 @@ import re
 
 import requests
 from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseNotFound
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_safe
 
 UPSTREAM = "https://tile.openstreetmap.org"
 MAX_ZOOM = 19
@@ -35,7 +35,7 @@ def _blank_tile() -> HttpResponse:
     return response
 
 
-@require_GET
+@require_safe
 def tile_proxy(request, z: int, x: int, y: int, ext: str):
     if not _TILE_RE.match(ext or ""):
         return HttpResponseBadRequest("Unsupported tile extension.")
