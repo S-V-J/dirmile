@@ -16,6 +16,7 @@ import type {
   ApiError,
   CsrfResponse,
   LoginPayload,
+  Place,
   RegisterPayload,
   TripPlanCreatePayload,
   TripPlanDetail,
@@ -80,28 +81,48 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   const isUnsafe = method !== "GET";
 
-  const finalHeaders: Record<string, string> = {
-    Accept: "application/json",
-    ...headers,
+  const send = async (): Promise<Response> => {
+    const finalHeaders: Record<string, string> = {
+      Accept: "application/json",
+      ...headers,
+    };
+
+    if (body !== undefined) {
+      finalHeaders["Content-Type"] = "application/json";
+    }
+
+    if (isUnsafe) {
+      const csrf = await getCsrfToken();
+      if (csrf) {
+        finalHeaders["X-CSRFToken"] = csrf;
+      }
+    }
+
+    return fetch(`${API_BASE}${path}`, {
+      method,
+      credentials: "include",
+      headers: finalHeaders,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
   };
 
-  if (body !== undefined) {
-    finalHeaders["Content-Type"] = "application/json";
-  }
+  let res = await send();
 
-  if (isUnsafe) {
-    const csrf = await getCsrfToken();
-    if (csrf) {
-      finalHeaders["X-CSRFToken"] = csrf;
+  // Transparent single retry when Django rejects the token — e.g. it
+  // rotated the CSRF secret on login and our cached header still belongs
+  // to the previous cookie. Drop the cache, fetch a token paired with the
+  // CURRENT cookie, and replay the request exactly once (never loops).
+  if (isUnsafe && res.status === 403) {
+    const probe: unknown = await res.clone().json().catch(() => null);
+    const detail =
+      probe !== null && typeof probe === "object" && "detail" in probe
+        ? (probe as ApiError).detail
+        : undefined;
+    if (typeof detail === "string" && detail.includes("CSRF")) {
+      invalidateCsrfToken();
+      res = await send();
     }
   }
-
-  const res = await fetch(`${API_BASE}${path}`, {
-    method,
-    credentials: "include",
-    headers: finalHeaders,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
 
   // 204 No Content
   if (res.status === 204) {
@@ -131,8 +152,9 @@ export async function register(payload: RegisterPayload): Promise<User> {
     method: "POST",
     body: payload,
   });
-  // Refresh CSRF after login state changes.
-  await getCsrfToken();
+  // Register authenticates the new user → same rotation as login.
+  // Invalidate AFTER, never rely on a cached re-read.
+  invalidateCsrfToken();
   return user;
 }
 
@@ -142,7 +164,11 @@ export async function login(payload: LoginPayload): Promise<User> {
     method: "POST",
     body: payload,
   });
-  await getCsrfToken();
+  // Django rotates the CSRF secret inside login(). The token cached during
+  // the call above belongs to the OLD cookie — drop it so the next unsafe
+  // request fetches a token paired with the NEW cookie. (A getCsrfToken()
+  // here would be a cache-hit no-op: that was the original bug.)
+  invalidateCsrfToken();
   return user;
 }
 
@@ -213,3 +239,30 @@ export async function healthCheck(): Promise<{ status: string; service: string; 
 }
 
 export { ApiRequestError };
+
+// ── Places (autocomplete) ────────────────────────────────────────────
+
+/**
+ * Best-effort place search backing the Origin/Destination comboboxes.
+ * Returns an empty array on ANY failure (offline, 401, upstream 502):
+ * the dropdown simply hides and the user can still type free text,
+ * which the backend geocodes on submit anyway. GET needs no CSRF.
+ */
+export async function searchPlaces(query: string, count = 5): Promise<Place[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+
+  const params = new URLSearchParams({ q, count: String(count) });
+  try {
+    const res = await fetch(`${API_BASE}/places/?${params.toString()}`, {
+      method: "GET",
+      credentials: "include",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) return [];
+    const data: unknown = await res.json();
+    return Array.isArray(data) ? (data as Place[]) : [];
+  } catch {
+    return [];
+  }
+}
