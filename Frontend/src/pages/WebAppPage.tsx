@@ -89,20 +89,15 @@ export function WebAppPage() {
         </div>
 
         {/* ── Right Panel (Map) ──────────────────────────────── */}
-        <div className="h-[500px] lg:h-[700px]">
-          {plan ? (
-            <TripMap
-              routes={plan.routes}
-              selectedRouteId={selectedRoute?.id ?? null}
-              highlightCheckpointId={highlightedCheckpoint}
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center rounded-xl border border-brand-800/50 bg-brand-900/30">
-              <p className="text-sm text-brand-500">
-                Map will appear after you generate routes.
-              </p>
-            </div>
-          )}
+        {/* Always mounted: empty basemap before a plan exists,
+            routes/checkpoints/heatmap populate after generation.
+            TripMap is empty-safe (center fallback + guarded layers). */}
+        <div className="h-[720px] lg:h-[880px]">
+          <TripMap
+            routes={plan?.routes ?? []}
+            selectedRouteId={selectedRoute?.id ?? null}
+            highlightCheckpointId={highlightedCheckpoint}
+          />
         </div>
       </div>
     </section>

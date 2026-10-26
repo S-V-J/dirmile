@@ -110,6 +110,37 @@ const LEGEND_ITEMS: readonly RiskLevel[] = [
   "NO_TRAVEL",
 ];
 
+/**
+ * Leaflet measures its container once, at mount. The map now shares a flex
+ * column with the control strip below it, so re-measure after the browser has
+ * painted the final layout (and on every window resize). Without this, tiles
+ * can render offset or leave a grey band along one edge.
+ */
+function MapAutoResize() {
+  const map = useMap();
+
+  useEffect(() => {
+    let cancelled = false;
+    const invalidate = () => {
+      if (!cancelled) map.invalidateSize();
+    };
+
+    const raf = requestAnimationFrame(() => {
+      invalidate();
+      requestAnimationFrame(invalidate);
+    });
+
+    window.addEventListener("resize", invalidate);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", invalidate);
+    };
+  }, [map]);
+
+  return null;
+}
+
 export function TripMap({
   routes,
   selectedRouteId,
@@ -158,140 +189,152 @@ export function TripMap({
   );
 
   return (
-    <div className="relative h-full w-full overflow-hidden rounded-xl border border-brand-800/50 bg-brand-900">
-      <MapContainer
-        center={center}
-        zoom={6}
-        preferCanvas
-        style={{ height: "100%", width: "100%" }}
-        className="h-full w-full"
-      >
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
-
-        <FitBounds routes={routes} />
-        <FlyToCheckpoint checkpoint={highlightedCheckpoint} />
-
-        {/* Heatmap layer (rendered below polylines) */}
-        <HeatmapLayer
-          points={heatmapPoints}
-          hour={heatmapHour}
-          metric={heatmapMetric}
-          visible={heatmapVisible && heatmapPoints.length > 0}
-        />
-
-        {/* Route polylines */}
-        {routes.map((route, index) => {
-          const points = geometryToLatLngs(route);
-          if (points.length < 2) return null;
-          const isSelected = route.id === selectedRouteId;
-          if (!showAllRoutes && !isSelected && !route.is_recommended) {
-            return null;
-          }
-          return (
-            <Polyline
-              key={route.id}
-              positions={points}
-              pathOptions={{
-                color: routeLineColor(index, route.is_recommended),
-                weight: isSelected ? 5 : 3,
-                opacity: isSelected ? 0.95 : 0.55,
-              }}
+    <div className="flex h-full w-full flex-col overflow-hidden rounded-xl border border-brand-800/50 bg-brand-900">
+      {/* ── Map viewport: deliberately free of overlays ──────── */}
+      <div className="relative min-h-0 flex-1">
+        <MapContainer
+          center={center}
+          zoom={6}
+          preferCanvas
+          style={{ height: "100%", width: "100%" }}
+          className="h-full w-full"
+        >
+          <MapAutoResize />
+            <TileLayer
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+              url="/tiles/{z}/{x}/{y}.png"
             />
-          );
-        })}
 
-        {/* Checkpoints for the selected route */}
-        {showCheckpoints &&
-          selected?.checkpoints.map((cp) => {
-            const isHighlighted = cp.id === highlightCheckpointId;
-            return (
-              <CircleMarker
-                key={cp.id}
-                center={[cp.lat, cp.lng]}
-                radius={isHighlighted ? 9 : 6}
-                pathOptions={{
-                  color: isHighlighted ? "#ffffff" : "#0b1220",
-                  weight: isHighlighted ? 3 : 1.5,
-                  fillColor: RISK_HEX[cp.overall_risk] ?? RISK_HEX.LOW,
-                  fillOpacity: 0.9,
-                }}
-              >
-                <Popup>
-                  <div className="space-y-1 text-xs">
-                    <p className="font-semibold">
-                      {selected.label} · Mile {cp.mile_marker.toFixed(0)}
-                    </p>
-                    <p>ETA: {formatEta(cp.eta_utc)}</p>
-                    <p>Wind: {cp.wind_mph.toFixed(1)} mph</p>
-                    <p>Rain: {cp.rain_in_hr.toFixed(2)} in/hr</p>
-                    <p>Snow: {cp.snow_in_hr.toFixed(2)} in/hr</p>
-                    <p
-                      className="font-semibold"
-                      style={{ color: RISK_HEX[cp.overall_risk] }}
-                    >
-                      Risk: {RISK_LABELS[cp.overall_risk]}
-                    </p>
-                  </div>
-                </Popup>
-              </CircleMarker>
-            );
-          })}
-      </MapContainer>
+            <FitBounds routes={routes} />
+            <FlyToCheckpoint checkpoint={highlightedCheckpoint} />
 
-      {/* ── Layer toggles (top-left) ─────────────────────────── */}
-      <div className="absolute left-3 top-3 z-[1000] space-y-1 rounded-lg border border-brand-800/60 bg-brand-950/85 p-3 text-xs text-brand-200 shadow-lg backdrop-blur">
-        <label className="flex cursor-pointer items-center gap-2">
-          <input
-            type="checkbox"
-            checked={showAllRoutes}
-            onChange={(e) => setShowAllRoutes(e.target.checked)}
-            className="h-3.5 w-3.5 accent-brand-400"
-          />
-          Show all routes
-        </label>
-        <label className="flex cursor-pointer items-center gap-2">
-          <input
-            type="checkbox"
-            checked={showCheckpoints}
-            onChange={(e) => setShowCheckpoints(e.target.checked)}
-            className="h-3.5 w-3.5 accent-brand-400"
-          />
-          Show checkpoints
-        </label>
+            {/* Heatmap layer (rendered below polylines) */}
+            <HeatmapLayer
+              points={heatmapPoints}
+              hour={heatmapHour}
+              metric={heatmapMetric}
+              visible={heatmapVisible && heatmapPoints.length > 0}
+            />
+
+            {/* Route polylines */}
+            {routes.map((route, index) => {
+              const points = geometryToLatLngs(route);
+              if (points.length < 2) return null;
+              const isSelected = route.id === selectedRouteId;
+              if (!showAllRoutes && !isSelected && !route.is_recommended) {
+                return null;
+              }
+              return (
+                <Polyline
+                  key={route.id}
+                  positions={points}
+                  pathOptions={{
+                    color: routeLineColor(index, route.is_recommended),
+                    weight: isSelected ? 5 : 3,
+                    opacity: isSelected ? 0.95 : 0.55,
+                  }}
+                />
+              );
+            })}
+
+            {/* Checkpoints for the selected route */}
+            {showCheckpoints &&
+              selected?.checkpoints.map((cp) => {
+                const isHighlighted = cp.id === highlightCheckpointId;
+                return (
+                  <CircleMarker
+                    key={cp.id}
+                    center={[cp.lat, cp.lng]}
+                    radius={isHighlighted ? 9 : 6}
+                    pathOptions={{
+                      color: isHighlighted ? "#ffffff" : "#0b1220",
+                      weight: isHighlighted ? 3 : 1.5,
+                      fillColor: RISK_HEX[cp.overall_risk] ?? RISK_HEX.LOW,
+                      fillOpacity: 0.9,
+                    }}
+                  >
+                    <Popup>
+                      <div className="space-y-1 text-xs">
+                        <p className="font-semibold">
+                          {selected.label} · Mile {cp.mile_marker.toFixed(0)}
+                        </p>
+                        <p>ETA: {formatEta(cp.eta_utc)}</p>
+                        <p>Wind: {cp.wind_mph.toFixed(1)} mph</p>
+                        <p>Rain: {cp.rain_in_hr.toFixed(2)} in/hr</p>
+                        <p>Snow: {cp.snow_in_hr.toFixed(2)} in/hr</p>
+                        <p
+                          className="font-semibold"
+                          style={{ color: RISK_HEX[cp.overall_risk] }}
+                        >
+                          Risk: {RISK_LABELS[cp.overall_risk]}
+                        </p>
+                      </div>
+                    </Popup>
+                  </CircleMarker>
+                );
+              })}
+        </MapContainer>
       </div>
 
-      {/* ── Forecast slider (bottom-right) ───────────────────── */}
-      <div className="absolute bottom-3 right-3 z-[1000] w-72 max-w-[calc(100%-1.5rem)]">
-        <ForecastSlider
-          hour={heatmapHour}
-          onHourChange={handleHourChange}
-          metric={heatmapMetric}
-          onMetricChange={handleMetricChange}
-          visible={heatmapVisible}
-          onToggleVisible={handleToggleHeatmap}
-        />
-      </div>
+      {/* ── Control strip: below the map, never on top of it ─── */}
+      <div className="shrink-0 border-t border-brand-800/60 bg-brand-950/70 p-3">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,auto)_minmax(0,1fr)_minmax(0,auto)]">
+          {/* Layer toggles (were: top-left overlay) */}
+          <div className="rounded-lg border border-brand-800/60 bg-brand-950/80 p-3">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-400">
+              Layers
+            </p>
+            <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-brand-200">
+              <label className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={showAllRoutes}
+                  onChange={(e) => setShowAllRoutes(e.target.checked)}
+                  className="h-3.5 w-3.5 accent-brand-400"
+                />
+                Show all routes
+              </label>
+              <label className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={showCheckpoints}
+                  onChange={(e) => setShowCheckpoints(e.target.checked)}
+                  className="h-3.5 w-3.5 accent-brand-400"
+                />
+                Show checkpoints
+              </label>
+            </div>
+          </div>
 
-      {/* ── Risk legend (bottom-left) ────────────────────────── */}
-      <div className="absolute bottom-3 left-3 z-[1000] rounded-lg border border-brand-800/60 bg-brand-950/85 p-3 text-xs shadow-lg backdrop-blur">
-        <p className="mb-1.5 font-semibold uppercase tracking-wide text-brand-400">
-          Risk
-        </p>
-        <ul className="space-y-1">
-          {LEGEND_ITEMS.map((level) => (
-            <li key={level} className="flex items-center gap-2 text-brand-200">
-              <span
-                className="inline-block h-3 w-3 rounded-full border border-black/40"
-                style={{ backgroundColor: RISK_HEX[level] }}
-                aria-hidden="true"
-              />
-              {RISK_LABELS[level]}
-            </li>
-          ))}
-        </ul>
+          {/* Forecast slider (were: bottom-right overlay) */}
+          <ForecastSlider
+            hour={heatmapHour}
+            onHourChange={handleHourChange}
+            metric={heatmapMetric}
+            onMetricChange={handleMetricChange}
+            visible={heatmapVisible}
+            onToggleVisible={handleToggleHeatmap}
+          />
+
+          {/* Risk legend (were: bottom-left overlay) */}
+          <div className="rounded-lg border border-brand-800/60 bg-brand-950/80 p-3">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-400">
+              Risk
+            </p>
+            <ul className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-brand-200">
+              {LEGEND_ITEMS.map((level) => (
+                <li key={level} className="flex items-center gap-2">
+                  <span
+                    className="inline-block h-3 w-3 rounded-full border border-black/40"
+                    style={{ backgroundColor: RISK_HEX[level] }}
+                    aria-hidden="true"
+                  />
+                  {RISK_LABELS[level]}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
       </div>
     </div>
   );
