@@ -1,5 +1,6 @@
 import type { Checkpoint, RiskLevel } from "../types/api";
 import { RISK_COLORS, RISK_LABELS } from "../types/api";
+import { RISK_HEX } from "../lib/riskColors";
 
 interface CheckpointListProps {
   checkpoints: Checkpoint[];
@@ -89,7 +90,7 @@ function RiskBadge({ level }: { level: RiskLevel }) {
     <span
       className="inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
       style={{
-        backgroundColor: `${RISK_COLORS[level]}33`,
+        backgroundColor: `${RISK_HEX[level]}33`,
         color: RISK_COLORS[level],
       }}
     >

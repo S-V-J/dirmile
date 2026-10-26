@@ -20,6 +20,10 @@ interface TripMapProps {
   routes: RouteOption[];
   selectedRouteId: string | null;
   highlightCheckpointId?: string | null;
+  /** Seed the heatmap metric from the saved user setting. */
+  initialMetric?: HeatmapMetric;
+  /** Map-to-list sync: fires when a checkpoint marker is clicked. */
+  onCheckpointClick?: (cp: Checkpoint) => void;
 }
 
 /**
@@ -145,6 +149,8 @@ export function TripMap({
   routes,
   selectedRouteId,
   highlightCheckpointId,
+  initialMetric,
+  onCheckpointClick,
 }: TripMapProps) {
   const [showAllRoutes, setShowAllRoutes] = useState(true);
   const [showCheckpoints, setShowCheckpoints] = useState(true);
@@ -152,7 +158,7 @@ export function TripMap({
   // Heatmap state
   const [heatmapVisible, setHeatmapVisible] = useState(true);
   const [heatmapHour, setHeatmapHour] = useState(0);
-  const [heatmapMetric, setHeatmapMetric] = useState<HeatmapMetric>("risk");
+  const [heatmapMetric, setHeatmapMetric] = useState<HeatmapMetric>(initialMetric ?? "risk");
 
   const selected =
     routes.find((r) => r.id === selectedRouteId) ?? null;
@@ -246,6 +252,7 @@ export function TripMap({
                     key={cp.id}
                     center={[cp.lat, cp.lng]}
                     radius={isHighlighted ? 9 : 6}
+                    eventHandlers={{ click: () => onCheckpointClick?.(cp) }}
                     pathOptions={{
                       color: isHighlighted ? "#ffffff" : "#0b1220",
                       weight: isHighlighted ? 3 : 1.5,

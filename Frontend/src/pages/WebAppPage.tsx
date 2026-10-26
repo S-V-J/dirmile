@@ -97,6 +97,8 @@ export function WebAppPage() {
             routes={plan?.routes ?? []}
             selectedRouteId={selectedRoute?.id ?? null}
             highlightCheckpointId={highlightedCheckpoint}
+            initialMetric={user?.heatmap_metric ?? "risk"}
+            onCheckpointClick={handleCheckpointClick}
           />
         </div>
       </div>
