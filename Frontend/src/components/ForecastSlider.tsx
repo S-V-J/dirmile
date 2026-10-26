@@ -44,7 +44,7 @@ export function ForecastSlider({
   );
 
   return (
-    <div className="space-y-3 rounded-xl border border-brand-800/60 bg-brand-950/90 p-4 shadow-lg backdrop-blur">
+    <div className="space-y-3">
       {/* Header row: toggle + title */}
       <div className="flex items-center justify-between">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-brand-400">

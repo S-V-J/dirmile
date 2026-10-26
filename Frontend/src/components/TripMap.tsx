@@ -277,14 +277,14 @@ export function TripMap({
       </div>
 
       {/* ── Control strip: below the map, never on top of it ─── */}
-      <div className="shrink-0 border-t border-brand-800/60 bg-brand-950/70 p-3">
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,auto)_minmax(0,1fr)_minmax(0,auto)]">
-          {/* Layer toggles (were: top-left overlay) */}
-          <div className="rounded-lg border border-brand-800/60 bg-brand-950/80 p-3">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-400">
+      <div className="shrink-0 border-t border-brand-800/60 bg-brand-950/70 px-4 py-3">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-5">
+          {/* Layer toggles */}
+          <section className="lg:w-44 lg:shrink-0">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-400">
               Layers
-            </p>
-            <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-brand-200">
+            </h3>
+            <div className="space-y-1.5 text-xs text-brand-200">
               <label className="flex cursor-pointer items-center gap-2">
                 <input
                   type="checkbox"
@@ -304,28 +304,40 @@ export function TripMap({
                 Show checkpoints
               </label>
             </div>
-          </div>
+          </section>
 
-          {/* Forecast slider (were: bottom-right overlay) */}
-          <ForecastSlider
-            hour={heatmapHour}
-            onHourChange={handleHourChange}
-            metric={heatmapMetric}
-            onMetricChange={handleMetricChange}
-            visible={heatmapVisible}
-            onToggleVisible={handleToggleHeatmap}
+          <div
+            className="hidden self-stretch bg-brand-800/60 lg:block lg:w-px"
+            aria-hidden="true"
           />
 
-          {/* Risk legend (were: bottom-left overlay) */}
-          <div className="rounded-lg border border-brand-800/60 bg-brand-950/80 p-3">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-400">
+          {/* Forecast slider — flexes to fill the middle */}
+          <section className="min-w-0 flex-1">
+            <ForecastSlider
+              hour={heatmapHour}
+              onHourChange={handleHourChange}
+              metric={heatmapMetric}
+              onMetricChange={handleMetricChange}
+              visible={heatmapVisible}
+              onToggleVisible={handleToggleHeatmap}
+            />
+          </section>
+
+          <div
+            className="hidden self-stretch bg-brand-800/60 lg:block lg:w-px"
+            aria-hidden="true"
+          />
+
+          {/* Risk legend */}
+          <section className="lg:w-40 lg:shrink-0">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-400">
               Risk
-            </p>
-            <ul className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-brand-200">
+            </h3>
+            <ul className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs text-brand-200 lg:grid-cols-1">
               {LEGEND_ITEMS.map((level) => (
                 <li key={level} className="flex items-center gap-2">
                   <span
-                    className="inline-block h-3 w-3 rounded-full border border-black/40"
+                    className="inline-block h-3 w-3 shrink-0 rounded-full border border-black/40"
                     style={{ backgroundColor: RISK_HEX[level] }}
                     aria-hidden="true"
                   />
@@ -333,7 +345,7 @@ export function TripMap({
                 </li>
               ))}
             </ul>
-          </div>
+          </section>
         </div>
       </div>
     </div>

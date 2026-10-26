@@ -15,7 +15,6 @@ import re
 
 import requests
 from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseNotFound
-from django.views.decorators.cache import cache_control
 from django.views.decorators.http import require_GET
 
 UPSTREAM = "https://tile.openstreetmap.org"
@@ -25,8 +24,18 @@ USER_AGENT = "Dirmile/0.1 (weather-aware truck routing; tile proxy)"
 _TILE_RE = re.compile(r"^(?:png|jpe?g)$", re.IGNORECASE)
 
 
+def _blank_tile() -> HttpResponse:
+    """
+    Empty tile (upstream hiccup / non-image). Must never be cached: a
+    transient 502 upstream would otherwise punch a hole in the map for the
+    full max-age window. Successful tiles get their own long-lived header.
+    """
+    response = HttpResponse(status=204)
+    response["Cache-Control"] = "no-store"
+    return response
+
+
 @require_GET
-@cache_control(public=True, max_age=604800)  # 7 days — tiles are immutable
 def tile_proxy(request, z: int, x: int, y: int, ext: str):
     if not _TILE_RE.match(ext or ""):
         return HttpResponseBadRequest("Unsupported tile extension.")
@@ -46,14 +55,14 @@ def tile_proxy(request, z: int, x: int, y: int, ext: str):
     except requests.RequestException:
         # Never leak the upstream failure as a 500 storm; serve a blank 204 so
         # Leaflet simply shows no tile there.
-        return HttpResponse(status=204)
+        return _blank_tile()
 
     if upstream.status_code != 200:
-        return HttpResponse(status=204)
+        return _blank_tile()
 
     content_type = upstream.headers.get("Content-Type", "image/png")
     if not content_type.startswith("image/"):
-        return HttpResponse(status=204)
+        return _blank_tile()
 
     response = HttpResponse(upstream.content, content_type=content_type)
     response["Cache-Control"] = "public, max-age=604800, immutable"
