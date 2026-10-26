@@ -7,7 +7,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import User
-from plans.models import Checkpoint, RouteOption, TripPlan
+from plans.models import Checkpoint, HeatmapPoint, RouteOption, TripPlan
 from plans.services import (
     PlaceResolutionError,
     PlanServiceError,
@@ -158,7 +158,39 @@ class TripPlanApiTests(TestCase):
     @patch("plans.api.create_trip_plan")
     def test_create_plan_valid_input_returns_201(self, mock_create):
         self._login()
-        mock_create.return_value = SAMPLE_PLAN_RESPONSE
+        plan = self._create_db_plan()
+        route = RouteOption.objects.create(
+            plan=plan,
+            label="Route A",
+            route_index=0,
+            is_recommended=True,
+            geometry={
+                "type": "LineString",
+                "coordinates": [[-84.512, 39.1031], [-87.6298, 41.8781]],
+            },
+        )
+        Checkpoint.objects.create(
+            route=route,
+            mile_marker=0.0,
+            lat=39.1031,
+            lng=-84.5120,
+            eta_utc=plan.departure,
+            wind_mph=10.0,
+            rain_in_hr=0.0,
+            snow_in_hr=0.0,
+            overall_risk="LOW",
+        )
+        HeatmapPoint.objects.create(
+            route=route,
+            mile_marker=0.0,
+            lat=39.1031,
+            lng=-84.5120,
+            hourly_risk=[0] * 49,
+            hourly_wind=[1.0] * 49,
+            hourly_rain=[0.0] * 49,
+            hourly_snow=[0.0] * 49,
+        )
+        mock_create.return_value = {"plan_id": str(plan.id), "status": "completed"}
 
         response = self.client.post(
             "/api/plans/",
@@ -167,9 +199,15 @@ class TripPlanApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(response.data["id"], str(plan.id))
         self.assertEqual(response.data["status"], "completed")
+        self.assertEqual(response.data["origin_name"], "Cincinnati, OH")
         self.assertEqual(len(response.data["routes"]), 1)
-        self.assertTrue(response.data["routes"][0]["recommended"])
+        self.assertTrue(response.data["routes"][0]["is_recommended"])
+        self.assertEqual(
+            len(response.data["routes"][0]["heatmap_points"]),
+            1,
+        )
 
         mock_create.assert_called_once()
         call_kwargs = mock_create.call_args

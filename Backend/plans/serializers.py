@@ -3,7 +3,7 @@ from datetime import timedelta
 from django.utils import timezone
 from rest_framework import serializers
 
-from plans.models import Checkpoint, RouteOption, TripPlan
+from plans.models import Checkpoint, HeatmapPoint, RouteOption, TripPlan
 
 MAX_DEPARTURE_DAYS_AHEAD = 16
 LOAD_WARN_THRESHOLD_LB = 80000
@@ -90,12 +90,35 @@ class CheckpointSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class HeatmapPointSerializer(serializers.ModelSerializer):
+    """
+    Read-only dense corridor point powering the 0–48 h heatmap slider.
+    Exposes mile_marker as `mile` to match the frontend contract (api.ts).
+    """
+
+    mile = serializers.FloatField(source="mile_marker")
+
+    class Meta:
+        model = HeatmapPoint
+        fields = [
+            "lat",
+            "lng",
+            "mile",
+            "hourly_risk",
+            "hourly_wind",
+            "hourly_rain",
+            "hourly_snow",
+        ]
+        read_only_fields = fields
+
+
 class RouteOptionSerializer(serializers.ModelSerializer):
     """
     Read-only serializer for a single route option including checkpoints.
     """
 
     checkpoints = CheckpointSerializer(many=True, read_only=True)
+    heatmap_points = HeatmapPointSerializer(many=True, read_only=True)
 
     class Meta:
         model = RouteOption
@@ -115,6 +138,7 @@ class RouteOptionSerializer(serializers.ModelSerializer):
             "recommendation_reasons",
             "geometry",
             "checkpoints",
+            "heatmap_points",
         ]
         read_only_fields = fields
 

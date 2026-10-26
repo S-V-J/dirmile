@@ -14,7 +14,7 @@ from core.geo import (
     geojson_linestring_to_points,
     total_route_miles,
 )
-from plans.models import Checkpoint, RouteOption, TripPlan
+from plans.models import Checkpoint, HeatmapPoint, RouteOption, TripPlan
 from plans.recommendation import aggregate_route_metrics, recommend_routes
 from routing.eta import estimate_checkpoint_etas
 from routing.osrm import RoutingError
@@ -474,10 +474,11 @@ def _fetch_weather_lookup(
     if max_batch <= 0:
         max_batch = 200
 
-    results: list[Any] = []
+    coord_list = list(coordinates)
+    batches: list[tuple[list, list]] = []
 
     try:
-        for chunk in _chunked(list(coordinates), max_batch):
+        for chunk in _chunked(coord_list, max_batch):
             chunk_results = fn(chunk, start_time, end_time)
 
             if chunk_results is None:
@@ -486,31 +487,32 @@ def _fetch_weather_lookup(
             if isinstance(chunk_results, Mapping):
                 chunk_results = [chunk_results]
 
-            results.extend(list(chunk_results))
+            batches.append((list(chunk), list(chunk_results)))
     except WeatherError as exc:
         raise WeatherSamplingError(str(exc)) from exc
 
     lookup: dict[str, dict] = {}
 
-    for index, item in enumerate(results):
-        if not isinstance(item, Mapping):
-            continue
+    for chunk, chunk_results in batches:
+        if len(chunk_results) != len(chunk):
+            raise WeatherSamplingError(
+                "Weather batch returned "
+                f"{len(chunk_results)} results for {len(chunk)} coordinates."
+            )
 
-        lat = item.get("latitude")
-        lng = item.get("longitude")
-
-        if (lat is None or lng is None) and index < len(coordinates):
-            lat, lng = coordinates[index]
-
-        if lat is None or lng is None:
-            continue
-
-        try:
-            key = _coord_key(float(lat), float(lng))
-        except (TypeError, ValueError):
-            continue
-
-        lookup[key] = dict(item)
+        # Key by the REQUESTED coordinate, paired positionally. Open-Meteo
+        # echoes grid-snapped coordinates in each payload (e.g. -84.5120 comes
+        # back as -84.51); keying by the echoed value makes every downstream
+        # _coord_key lookup miss and silently degrades the whole corridor to
+        # the safe default weather (all-LOW risk, null temperatures).
+        for (lat, lng), item in zip(chunk, chunk_results):
+            if not isinstance(item, Mapping):
+                continue
+            try:
+                key = _coord_key(float(lat), float(lng))
+            except (TypeError, ValueError):
+                continue
+            lookup[key] = dict(item)
 
     return lookup
 
@@ -979,6 +981,22 @@ def create_trip_plan(
                 )
 
                 heatmap_by_route_id[str(route_obj.id)] = heatmap_points
+
+                HeatmapPoint.objects.bulk_create(
+                    [
+                        HeatmapPoint(
+                            route=route_obj,
+                            mile_marker=point["mile"],
+                            lat=point["lat"],
+                            lng=point["lng"],
+                            hourly_risk=point["hourly_risk"],
+                            hourly_wind=point["hourly_wind"],
+                            hourly_rain=point["hourly_rain"],
+                            hourly_snow=point["hourly_snow"],
+                        )
+                        for point in heatmap_points
+                    ]
+                )
 
                 route_dicts.append(
                     {

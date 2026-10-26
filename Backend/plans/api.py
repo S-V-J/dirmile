@@ -83,7 +83,24 @@ class TripPlanCreateListView(views.APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-        return Response(result, status=status.HTTP_201_CREATED)
+        plan_id = result.get("plan_id") if isinstance(result, dict) else None
+        if not plan_id:
+            return Response(
+                {"detail": "Plan creation returned no identifier."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        plan = (
+            TripPlan.objects.prefetch_related(
+                "route_options__checkpoints",
+                "route_options__heatmap_points",
+            )
+            .get(pk=plan_id)
+        )
+        return Response(
+            TripPlanDetailSerializer(plan).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     def get(self, request, *args, **kwargs):
         if not _is_authenticated(request):
