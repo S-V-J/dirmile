@@ -85,3 +85,8 @@ Thumbs.db
 # Django test databases
 test_*.sqlite3
 Backend/test_*.sqlite3
+# Backups and scratch
+*.bak
+*.bak.*
+*.orig
+*.rej
