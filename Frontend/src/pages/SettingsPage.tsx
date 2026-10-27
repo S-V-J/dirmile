@@ -4,21 +4,11 @@ import { getCurrentUser, updateSettings } from "../api/client";
 import type { User } from "../types/api";
 
 const INTERVAL_OPTIONS = [10, 25, 50] as const;
-const THEME_OPTIONS = [
-  { value: "light", label: "Light" },
-  { value: "dark", label: "Dark" },
-  { value: "system", label: "System" },
-] as const;
 const METRIC_OPTIONS = [
   { value: "risk", label: "Combined Risk" },
   { value: "wind", label: "Wind" },
   { value: "rain", label: "Rain" },
   { value: "snow", label: "Snow" },
-] as const;
-const MAP_STYLE_OPTIONS = [
-  { value: "streets", label: "Streets" },
-  { value: "satellite", label: "Satellite" },
-  { value: "terrain", label: "Terrain" },
 ] as const;
 
 interface SettingsForm {
@@ -186,34 +176,6 @@ export function SettingsPage() {
           </p>
         </fieldset>
 
-        {/* Theme */}
-        <fieldset className="space-y-3 rounded-xl border border-brand-800/50 bg-brand-900/50 p-5">
-          <legend className="px-2 text-sm font-semibold text-brand-200">
-            Theme
-          </legend>
-          <div className="flex gap-3">
-            {THEME_OPTIONS.map((opt) => (
-              <label
-                key={opt.value}
-                className={`flex cursor-pointer items-center gap-2 rounded-lg border px-4 py-2 text-sm transition-colors ${
-                  form.theme === opt.value
-                    ? "border-brand-500 bg-brand-800/60 text-brand-100"
-                    : "border-brand-700/50 bg-brand-900/40 text-brand-400 hover:border-brand-600"
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="theme"
-                  value={opt.value}
-                  checked={form.theme === opt.value}
-                  onChange={() => handleChange("theme", opt.value)}
-                  className="sr-only"
-                />
-                {opt.label}
-              </label>
-            ))}
-          </div>
-        </fieldset>
 
         {/* Heatmap Metric */}
         <fieldset className="space-y-3 rounded-xl border border-brand-800/50 bg-brand-900/50 p-5">
@@ -247,37 +209,6 @@ export function SettingsPage() {
           </p>
         </fieldset>
 
-        {/* Map Style */}
-        <fieldset className="space-y-3 rounded-xl border border-brand-800/50 bg-brand-900/50 p-5">
-          <legend className="px-2 text-sm font-semibold text-brand-200">
-            Map Style
-          </legend>
-          <div className="flex gap-3">
-            {MAP_STYLE_OPTIONS.map((opt) => (
-              <label
-                key={opt.value}
-                className={`flex cursor-pointer items-center gap-2 rounded-lg border px-4 py-2 text-sm transition-colors ${
-                  form.map_style === opt.value
-                    ? "border-brand-500 bg-brand-800/60 text-brand-100"
-                    : "border-brand-700/50 bg-brand-900/40 text-brand-400 hover:border-brand-600"
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="map_style"
-                  value={opt.value}
-                  checked={form.map_style === opt.value}
-                  onChange={() => handleChange("map_style", opt.value)}
-                  className="sr-only"
-                />
-                {opt.label}
-              </label>
-            ))}
-          </div>
-          <p className="text-xs text-brand-500">
-            Basemap tile style for the trip map.
-          </p>
-        </fieldset>
 
         {/* Submit */}
         <div className="flex items-center gap-4">
