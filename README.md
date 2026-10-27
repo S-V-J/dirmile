@@ -125,12 +125,12 @@ Open the printed URL, register, and plan a trip.
 
 ## Screenshots
 
+| | |
 |---|---|
-| ![Trip form and route cards](image.png)| ![Routes and heatmap on the map](image-1.png) |
-| Trip inputs with place autocomplete | Three route options, checkpoint markers, 0–48 h heatmap |
-| ![Checkpoint table with risk badges](image-2.png) | ![Settings](image-3.png) |
-| Per-milepoint ETAs, wind/rain/snow, risk grades | Persisted defaults driving the app |
-
+| ![Dirmile trip planner form with origin and destination autocomplete, departure date time picker and load weight input](docs/screenshots/01-trip-form-autocomplete.png) | ![Three route option cards with risk coloured checkpoint markers and the 0 to 48 hour weather heatmap on a Leaflet OpenStreetMap basemap](docs/screenshots/02-routes-heatmap-map.png) |
+| **Trip inputs** — population-ranked place autocomplete, local-time departure picker, gross load weight, 10/25/50-mile checkpoint interval | **Map and heatmap** — route polylines in distinct colours, risk-graded checkpoint markers, corridor heatmap with forecast slider |
+| ![Checkpoint table showing mile markers, estimated arrival times, wind speed, rain and snow with risk level badges](docs/screenshots/03-checkpoint-table-risk.png) | ![Settings page with default checkpoint interval, default load weight and default heatmap metric controls](docs/screenshots/04-settings-defaults.png) |
+| **Checkpoint detail** — per-milepoint ETA, wind mph, rain and snow in/hr, and the overall risk grade, with load overrides flagged | **Persisted defaults** — saved preferences drive the app on next load, including the heatmap's opening metric |
 
 ## Features
 
