@@ -193,3 +193,23 @@ export interface HeatmapPoint {
   hourly_rain: number[];
   hourly_snow: number[];
 }
+
+// ── Places (autocomplete) ────────────────────────────────────────────
+
+/**
+ * One result from GET /api/places/?q=...
+ * `display_name` doubles as the value filled into the Origin/Destination
+ * inputs: the backend re-geocodes it deterministically on submit.
+ */
+export interface Place {
+  id: number;
+  name: string;
+  display_name: string;
+  latitude: number;
+  longitude: number;
+  country_code: string;
+  country: string;
+  admin1: string;
+  admin2: string;
+  timezone: string;
+}

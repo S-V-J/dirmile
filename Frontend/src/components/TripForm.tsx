@@ -1,7 +1,8 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import * as api from "../api/client";
-import type { TripPlanDetail } from "../types/api";
+import type { Place, TripPlanDetail } from "../types/api";
 
 interface TripFormProps {
   onPlanCreated: (plan: TripPlanDetail) => void;
@@ -22,6 +23,182 @@ function defaultDeparture(): string {
   // Format as YYYY-MM-DDTHH:mm (local time, no timezone suffix)
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+}
+
+const DEBOUNCE_MS = 300;
+const MIN_QUERY_CHARS = 2;
+
+interface PlaceComboboxProps {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  inputClass: string;
+  labelClass: string;
+  placeholder: string;
+  disabled?: boolean;
+}
+
+/**
+ * Autocomplete input backed by GET /api/places/?q=...
+ * Debounced, race-guarded, keyboard-navigable. Free text stays valid:
+ * the backend geocodes whatever is submitted, so a suggestion is only a
+ * convenience that guarantees an unambiguous display_name.
+ */
+function PlaceCombobox({
+  id,
+  label,
+  value,
+  onChange,
+  inputClass,
+  labelClass,
+  placeholder,
+  disabled = false,
+}: PlaceComboboxProps) {
+  const [places, setPlaces] = useState<Place[]>([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+
+  const requestIdRef = useRef(0);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const selectedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+
+    const query = value.trim();
+
+    // A pick just filled the input — don't re-search our own selection.
+    if (selectedRef.current !== null && query === selectedRef.current) {
+      selectedRef.current = null;
+      setPlaces([]);
+      setOpen(false);
+      setLoading(false);
+      return;
+    }
+
+    if (query.length < MIN_QUERY_CHARS) {
+      setPlaces([]);
+      setOpen(false);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    const requestId = ++requestIdRef.current;
+
+    timerRef.current = setTimeout(async () => {
+      const results = await api.searchPlaces(query);
+      if (requestId !== requestIdRef.current) return; // stale response
+      setLoading(false);
+      setPlaces(results);
+      setActiveIndex(-1);
+      setOpen(results.length > 0);
+    }, DEBOUNCE_MS);
+
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [value]);
+
+  const selectPlace = (place: Place) => {
+    selectedRef.current = place.display_name;
+    onChange(place.display_name);
+    setPlaces([]);
+    setOpen(false);
+    setLoading(false);
+  };
+
+  const listId = `${id}-places`;
+
+  return (
+    <div className="relative">
+      <label htmlFor={id} className={labelClass}>
+        {label}
+      </label>
+      <input
+        id={id}
+        type="text"
+        role="combobox"
+        aria-expanded={open}
+        aria-controls={listId}
+        aria-autocomplete="list"
+        aria-activedescendant={
+          open && activeIndex >= 0 ? `${id}-option-${activeIndex}` : undefined
+        }
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e: ReactKeyboardEvent<HTMLInputElement>) => {
+          if (!open || places.length === 0) {
+            if (e.key === "Escape") setOpen(false);
+            return;
+          }
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setActiveIndex((i) => (i + 1) % places.length);
+          } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setActiveIndex((i) => (i <= 0 ? places.length - 1 : i - 1));
+          } else if (e.key === "Enter") {
+            const picked = places[activeIndex];
+            if (picked) {
+              e.preventDefault();
+              selectPlace(picked);
+            }
+            // else: let the form submit with the free text as typed
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            setOpen(false);
+            setActiveIndex(-1);
+          }
+        }}
+        onBlur={() => {
+          setOpen(false);
+          setActiveIndex(-1);
+        }}
+        className={inputClass}
+        placeholder={placeholder}
+        autoComplete="off"
+        spellCheck={false}
+        disabled={disabled}
+      />
+      {loading && (
+        <p className="mt-1 text-xs text-brand-500" role="status">
+          Searching…
+        </p>
+      )}
+      {open && places.length > 0 && (
+        <ul
+          id={listId}
+          role="listbox"
+          aria-label={`${label} suggestions`}
+          className="absolute z-20 mt-1 w-full overflow-hidden rounded-md border border-brand-700 bg-brand-900 shadow-lg"
+        >
+          {places.map((place, index) => (
+            <li
+              key={`${place.id}-${index}`}
+              id={`${id}-option-${index}`}
+              role="option"
+              aria-selected={index === activeIndex}
+              onMouseDown={(e) => {
+                e.preventDefault(); // keep focus on the input through the click
+                selectPlace(place);
+              }}
+              onMouseEnter={() => setActiveIndex(index)}
+              className={`cursor-pointer px-3 py-2 text-sm ${
+                index === activeIndex
+                  ? "bg-brand-800 text-white"
+                  : "text-brand-200 hover:bg-brand-800 hover:text-white"
+              }`}
+            >
+              <span className="block truncate">{place.display_name}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 export function TripForm({
@@ -136,38 +313,28 @@ export function TripForm({
       )}
 
       {/* Origin */}
-      <div>
-        <label htmlFor="trip-origin" className={labelClass}>
-          Origin *
-        </label>
-        <input
+        <PlaceCombobox
           id="trip-origin"
-          type="text"
+          label="Origin *"
           value={origin}
-          onChange={(e) => setOrigin(e.target.value)}
-          className={inputClass}
+          onChange={setOrigin}
+          inputClass={inputClass}
+          labelClass={labelClass}
           placeholder="e.g. Cincinnati, OH"
-          autoComplete="off"
           disabled={isSubmitting}
         />
-      </div>
 
       {/* Destination */}
-      <div>
-        <label htmlFor="trip-destination" className={labelClass}>
-          Destination *
-        </label>
-        <input
+        <PlaceCombobox
           id="trip-destination"
-          type="text"
+          label="Destination *"
           value={destination}
-          onChange={(e) => setDestination(e.target.value)}
-          className={inputClass}
+          onChange={setDestination}
+          inputClass={inputClass}
+          labelClass={labelClass}
           placeholder="e.g. Chicago, IL"
-          autoComplete="off"
           disabled={isSubmitting}
         />
-      </div>
 
       {/* Departure */}
       <div>

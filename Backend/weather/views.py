@@ -86,6 +86,20 @@ def places_search(request):
             status=status.HTTP_502_BAD_GATEWAY,
         )
 
+    # Relevance: Open-Meteo's fuzzy matcher ranks by string similarity,
+    # so a short prefix like "Cin" can surface tiny towns above major
+    # cities. Prefer larger population; ties keep upstream order
+    # (Python's sort is stable). Internal field — never leaves the server.
+    def _population_rank(item):
+        if not isinstance(item, dict):
+            return 0.0
+        try:
+            return float(item.get("population") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    results.sort(key=_population_rank, reverse=True)
+
     places = [
         {key: item.get(key) for key in PLACE_FIELDS}
         for item in results

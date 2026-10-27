@@ -1,0 +1,7 @@
+# GitHub Sponsors — enables the Sponsor button in this repo's sidebar.
+# Docs: https://docs.github.com/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/displaying-a-sponsor-button-in-your-repository
+#
+# Only the platforms you actually use should be listed; anything uncommented
+# with an empty value renders as a broken link.
+
+github: [S-V-J]
