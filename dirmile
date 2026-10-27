@@ -417,7 +417,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=${BACKEND_DIR}
-ExecStart=${VENV_DIR}/bin/python manage.py runserver 0.0.0.0:8000 --noreload
+ExecStart=${PROJECT_ROOT}/scripts/systemd-serve.sh
 Restart=on-failure
 RestartSec=3
 StandardOutput=append:${LOG_FILE}
@@ -435,7 +435,7 @@ UNIT
   info "To start now:"
   info "  systemctl --user start dirmile.service"
   info ""
-  info "NOTE: systemd service uses a fixed port (8000)."
+info "NOTE: the service allocates a dynamic free port per start (runtime/systemd.port)."
   info "      For dynamic port allocation, prefer 'dirmile start'."
 }
 
