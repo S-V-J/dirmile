@@ -225,6 +225,13 @@ _stop_tunnel_quiet() {
     kill "${cpid}" 2>/dev/null || true
     rm -f "${RUNTIME_DIR}/tunnel.pid"
   fi
+  # Self-heal: pre-54f0b90 wrappers recorded tee's PID in tunnel.pid, so
+  # the targeted kill could miss the real cloudflared and strand a ghost
+  # proxy (one leaked per restart — the five-process pile-up of 2026-10-26).
+  # Sweep any surviving dirmile connector; both modes carry --no-autoupdate.
+  # Assumes dirmile owns cloudflared on this box.
+  pkill -f 'cloudflared tunnel --no-autoupdate' 2>/dev/null || true
+  sleep 1
   rm -f "${RUNTIME_DIR}/tunnel.url"
 }
 
@@ -259,29 +266,48 @@ _launch_tunnel() {
   fi
 
   # Wait for DNS propagation
-  local host_only="${url#https://}"
-  info "Waiting for DNS resolution..."
-  local dns_waited=0
-  while (( dns_waited < 30 )); do
-    if getent hosts "${host_only}" >/dev/null 2>&1; then
-      info "DNS resolved after ${dns_waited}s."
-      break
+  # ── DNS posture, mode-aware ──────────────────────────────────────────
+    # Quick tunnels publish their hostname instantly. A named tunnel's
+    # hostname only resolves once its zone delegation is live — for
+    # dirmile.eu.org that waits on eu.org approval, so probing for 30s is
+    # a stall plus a misleading warning. Named mode checks once and reports
+    # honestly; connector registration (proven by the wrapper) is the real
+    # readiness signal.
+    local host_only="${url#https://}"
+    local tunnel_kind="Quick tunnel (hostname rotates per restart)"
+    if [[ "${host_only}" != *.trycloudflare.com ]]; then
+      tunnel_kind="Named tunnel (stable hostname)"
+      if getent hosts "${host_only}" >/dev/null 2>&1; then
+        info "DNS resolves: ${host_only}"
+      else
+        info "DNS: ${host_only} is not publicly resolvable yet."
+        info "     The tunnel connector is registered; the hostname will"
+        info "     serve as soon as the zone delegation lands (eu.org)."
+      fi
+    else
+      info "Waiting for DNS resolution..."
+      local dns_waited=0
+      while (( dns_waited < 30 )); do
+        if getent hosts "${host_only}" >/dev/null 2>&1; then
+          info "DNS resolved after ${dns_waited}s."
+          break
+        fi
+        sleep 1
+        dns_waited=$((dns_waited + 1))
+      done
+      if (( dns_waited >= 30 )); then
+        info "WARNING: DNS not yet resolved (30s). Browser may still work."
+      fi
     fi
-    sleep 1
-    dns_waited=$((dns_waited + 1))
-  done
-  if (( dns_waited >= 30 )); then
-    info "WARNING: DNS not yet resolved (30s). Browser may still work."
-  fi
 
-  info "--------------------------------------------"
-  info " Cloudflare Tunnel is LIVE."
-  info " Public URL: ${url}"
-  info " Backend:    ${backend_url}"
-  info " Log:        ${LOG_FILE}"
-  info "--------------------------------------------"
-  info "Open ${url} in your browser."
-  info "To stop tunnel only: ./dirmile tunnel-stop"
+    info "--------------------------------------------"
+    info " Cloudflare Tunnel is LIVE.  (${tunnel_kind})"
+    info " Public URL: ${url}"
+    info " Backend:    ${backend_url}"
+    info " Log:        ${LOG_FILE}"
+    info "--------------------------------------------"
+    info "Open ${url} in your browser."
+    info "To stop tunnel only: ./dirmile tunnel-stop""
 }
 
 cmd_start() {
