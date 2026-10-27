@@ -475,7 +475,7 @@ zone delegation never looks like a failure.
 ```bash
 cloudflared tunnel login
 cloudflared tunnel create dirmile
-cloudflared tunnel route dns dirmile dirmile.eu.org
+cloudflared tunnel route dns dirmile dirmile.example.com
 ```
 
 Then in `.env`:
@@ -485,9 +485,9 @@ TUNNEL_MODE=named
 TUNNEL_NAME=dirmile
 TUNNEL_ID=<uuid printed by tunnel create>
 TUNNEL_CREDS=/home/you/.cloudflared/<uuid>.json
-TUNNEL_HOSTNAME=dirmile.eu.org
-ALLOWED_HOSTS=…,dirmile.eu.org
-CSRF_TRUSTED_ORIGINS=…,https://dirmile.eu.org
+TUNNEL_HOSTNAME=dirmile.example.com
+ALLOWED_HOSTS=…,dirmile.example.com
+CSRF_TRUSTED_ORIGINS=…,https://dirmile.example.com
 ```
 
 ```bash
